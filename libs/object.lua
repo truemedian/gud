@@ -1,0 +1,303 @@
+local bit = require('bit')
+local miniz = require('miniz')
+
+local hash_length = 20 -- SHA1 hash is 20 bytes
+local hash_length_hex = hash_length * 2
+
+local function hex2bin(cc) return string.char(tonumber(cc, 16)) end
+local function bin2hex(c) return string.format('%02x', string.byte(c)) end
+
+local function mode_is_tree(mode)
+    return mode == 0x4000 -- 0b0100_000_000000000
+end
+
+local function mode_is_file(mode)
+    return bit.band(mode, 0xF000) == 0x8000 -- 0b1000_000_XXXXXXXXX
+end
+
+local function mode_is_symlink(mode)
+    return bit.band(mode, 0xF000) == 0xA000 -- 0b1010_000_XXXXXXXXX
+end
+
+local function mode_is_gitlink(mode)
+    return mode == 0xE000 -- 0b1110_000_000000000
+end
+
+local function mode_to_name(mode)
+    if mode_is_tree(mode) then
+        return 'tree'
+    elseif mode_is_file(mode) then
+        return 'blob'
+    elseif mode_is_symlink(mode) then
+        return 'blob'
+    elseif mode_is_gitlink(mode) then
+        return 'commit'
+    end
+
+    return 'unknown'
+end
+
+-- remove illegal characters from strings like emails or names
+local function safe(str) return str:match('^[%.,:;"\']*(.-)[%.,:;"\']*$'):gsub('[%z\n<>]', '') end
+
+local function encode_time(time)
+    assert(time.seconds, 'time.seconds must be a number')
+    assert(time.offset, 'time.offset must be a number')
+
+    assert(time.seconds > 0, 'time.seconds must be a positive number')
+    assert(time.offset >= -1440 and time.offset <= 1440, 'time.offset must be between -1440 and 1440')
+
+    return string.format('%d %+03d%02d', time.seconds, time.offset / 60, time.offset % 60)
+end
+
+local function encode_person(person)
+    assert(type(person.name) == 'string', 'person.name must be a string')
+    assert(type(person.email) == 'string', 'person.email must be a string')
+    assert(type(person.time) == 'table', 'person.time must be a table')
+
+    return string.format('%s <%s> %s', safe(person.name), safe(person.email), encode_time(person.time))
+end
+
+local function encode_tree(tree)
+    assert(type(tree) == 'table', 'tree must be a table')
+
+    local result = {}
+
+    for _, entry in ipairs(tree) do
+        assert(type(entry.name) == 'string', 'entry.name must be a string')
+        assert(type(entry.mode) == 'number', 'entry.mode must be a number: ' .. entry.name)
+        assert(type(entry.hash) == 'string' and #entry.hash == hash_length,
+               'entry.hash must be a hash string: ' .. entry.name)
+
+        local line = string.format('%o %s\0%s', entry.mode, entry.name, (entry.hash:gsub('..', hex2bin)))
+
+        table.insert(result, line)
+    end
+
+    return table.concat(result)
+end
+
+local function encode_tag(tag)
+    assert(type(tag) == 'table', 'tag must be a table')
+    assert(type(tag.object) == 'string' and #tag.object == hash_length_hex, 'tag.object must be a hash string')
+    assert(tag.type == 'commit' or tag.type == 'tree' or tag.type == 'blob', 'tag.type must be commit, tree or blob')
+    assert(type(tag.tag) == 'string', 'tag.tag must be a string')
+    assert(type(tag.tagger) == 'table', 'tag.tagger must be a persion table')
+    assert(type(tag.message) == 'string', 'tag.message must be a string')
+
+    if tag.message:sub(-1) ~= '\n' then tag.message = tag.message .. '\n' end
+    return string.format('object %s\ntype %s\ntag %s\ntagger %s\n\n%s', tag.object, tag.type, tag.tag,
+                         encode_person(tag.tagger), tag.message)
+end
+
+local function encode_commit(commit)
+    assert(type(commit) == 'table', 'commit must be a table')
+    assert(type(commit.tree) == 'string' and #commit.tree == hash_length_hex, 'commit.tree must be a hash string')
+    assert(type(commit.parents) == 'table', 'commit.parents must be a table')
+    assert(type(commit.author) == 'table', 'commit.author must be a persion table')
+    assert(type(commit.committer) == 'table', 'commit.committer must be a persion table')
+    assert(type(commit.message) == 'string', 'commit.message must be a string')
+
+    local lines = {}
+    lines[1] = string.format('tree %s', commit.tree)
+    for _, parent in ipairs(commit.parents) do
+        assert(type(parent) == 'string' and #parent == hash_length_hex, 'commit.parents must be a table of hash strings')
+        lines[#lines + 1] = string.format('parent %s', parent)
+    end
+    lines[#lines + 1] = string.format('author %s\ncommitter %s', encode_person(commit.author),
+                                      encode_person(commit.committer))
+
+    if commit.gpgsig then lines[#lines + 1] = 'gpgsig ' .. commit.gpgsig:gsub('\n', '\n ') end
+
+    lines[#lines + 1] = ''
+    lines[#lines + 1] = commit.message
+    return table.concat(lines, '\n')
+end
+
+local function decode_time(data)
+    local seconds, offset_hr, offset_min = string.match(data, '(%d+) ([+-]%d%d)(%d%d)')
+    assert(seconds, 'malformed time data')
+
+    local offset = tonumber(offset_hr) * 60 + tonumber(offset_min)
+    assert(offset >= -1440 and offset <= 1440, 'malformed time offset (must be between -1440 and 1440)')
+
+    return {seconds = tonumber(seconds), offset = offset}
+end
+
+local function decode_person(data)
+    local name, email, time = string.match(data, '([^<]+) <([^>]+)> (.+)')
+    assert(name, 'malformed person data')
+
+    return {name = name, email = email, time = decode_time(time)}
+end
+
+local hash_pattern_bin = string.rep('.', hash_length)
+local tree_pattern = '^([0-7]+) ([^%z]+)%z(' .. hash_pattern_bin .. ')' -- {mode} {name}\0{hash}
+local function decode_tree(data)
+    local pos, len = 1, #data
+
+    local tree = {}
+    while pos <= len do
+        local _, after, mode, name, hash = string.find(data, tree_pattern, pos)
+        assert(after, 'malformed tree object')
+
+        table.insert(tree, {mode = tonumber(mode, 8), name = name, hash = hash})
+
+        pos = after + 1
+    end
+
+    assert(pos == len + 1, 'malformed tree object')
+    return tree
+end
+
+local tag_pattern = '^object ([0-9a-fA-F]+)\ntype (%w+)\ntag ([^\n]+)\ntagger ([^\n]+)\n\n(.+)$'
+local function decode_tag(data)
+    local object, type, tag, tagger, message = string.match(data, tag_pattern)
+    assert(object, 'malformed tag object')
+
+    assert(#object == hash_length_hex, 'malformed tag object')
+    assert(type == 'commit' or type == 'tree' or type == 'blob', 'malformed tag type')
+
+    return {object = object, type = type, tag = tag, tagger = decode_person(tagger), message = message}
+end
+
+local function decode_commit(data)
+    local pos, len = 1, #data
+
+    local commit = {parents = {}}
+    while pos <= len do
+        local _, after, key, value = string.find(data, '^(%w+) ([^\n]+)\n', pos)
+        if not after then
+            if data:sub(pos, pos) == '\n' then
+                commit.message = data:sub(pos + 1)
+                break
+            else
+                error('malformed commit object')
+            end
+        end
+
+        if key == 'tree' then
+            assert(not commit.tree, 'malformed commit object')
+
+            commit.tree = value
+        elseif key == 'parent' then
+            table.insert(commit.parents, value)
+        elseif key == 'author' then
+            assert(not commit.author, 'malformed commit object')
+
+            commit.author = decode_person(value)
+        elseif key == 'committer' then
+            assert(not commit.committer, 'malformed commit object')
+
+            commit.committer = decode_person(value)
+        elseif key == 'gpgsig' then
+            assert(not commit.gpgsig, 'malformed commit object')
+            assert(value == '-----BEGIN PGP SIGNATURE-----', 'malformed gpgsig')
+
+            local before = after - #value
+            while pos <= len do
+                local _, after_nl = string.find(data, '[^\n]*\n ', after)
+                if not after_nl then break end
+
+                after = after_nl + 1
+            end
+
+            commit.gpgsig = data:sub(before, after - 1):gsub('\n ', '\n')
+        else
+            error('malformed commit object: unknown field ' .. key)
+        end
+
+        pos = after + 1
+    end
+
+    return commit
+end
+
+local function enframe(kind, data)
+    assert(type(kind) == 'string', 'kind must be a string')
+    assert(type(data) == 'string', 'data must be a string')
+
+    return string.format('%s %d\0%s', kind, #data, data)
+end
+
+local function deframe(framed)
+    local _, after, kind, len = string.find(framed, '^(%S+) (%d+)%z')
+    assert(kind, 'malformed frame')
+
+    local data = framed:sub(after + 1)
+    assert(#data == tonumber(len), 'malformed frame')
+    return kind, data
+end
+
+local function to_object(kind, data)
+    local encoded
+
+    if kind == 'commit' then
+        encoded = encode_commit(data)
+    elseif kind == 'tree' then
+        encoded = encode_tree(data)
+    elseif kind == 'tag' then
+        encoded = encode_tag(data)
+    elseif kind == 'blob' then
+        assert(type(data) == 'string', 'blob data must be a string')
+
+        encoded = data
+    else
+        error('unknown object kind: ' .. kind)
+    end
+
+    local framed = enframe(kind, encoded)
+    local compressed = miniz.compress(framed)
+    return compressed
+end
+
+local function from_object(compressed)
+    local framed = miniz.decompress(compressed)
+    local kind, data = deframe(framed)
+
+    local decoded
+    if kind == 'commit' then
+        decoded = decode_commit(data)
+    elseif kind == 'tree' then
+        decoded = decode_tree(data)
+    elseif kind == 'tag' then
+        decoded = decode_tag(data)
+    elseif kind == 'blob' then
+        decoded = data
+    else
+        error('unknown object kind: ' .. kind)
+    end
+
+    return kind, decoded
+end
+
+--- Reads a hash from a string. The hash can be in binary or hex format.
+--- @param data string
+--- @return string
+local function read_hash(data)
+    local line = data:match('^([^\n]+)')
+
+    if #line == hash_length then
+        return (line:gsub('.', bin2hex))
+    elseif #line == hash_length * 2 then
+        return line
+    else
+        error('malformed hash')
+    end
+end
+
+--- Writes a hash to a either binary or hex format.
+--- @param hash string
+--- @param is_hex boolean
+--- @return string
+local function write_hash(hash, is_hex)
+    assert(#hash == hash_length * 2, 'hash must be ' .. (hash_length * 2) .. ' bytes')
+
+    if is_hex then
+        return (hash:gsub('.', bin2hex))
+    else
+        return hash
+    end
+end
+
+return {encode = to_object, decode = from_object, read_hash = read_hash, write_hash = write_hash}
