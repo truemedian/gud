@@ -141,7 +141,8 @@ local function decode_tree(data)
         local _, after, mode, name, hash = string.find(data, tree_pattern, pos)
         assert(after, 'malformed tree object')
 
-        table.insert(tree, {mode = tonumber(mode, 8), name = name, hash = hash})
+        mode = tonumber(mode, 8)
+        table.insert(tree, {mode = mode, name = name, hash = hash:gsub('.', bin2hex), kind = mode_to_name(mode)})
 
         pos = after + 1
     end
@@ -172,6 +173,7 @@ local function decode_commit(data)
                 commit.message = data:sub(pos + 1)
                 break
             else
+                p(data)
                 error('malformed commit object')
             end
         end
@@ -195,12 +197,7 @@ local function decode_commit(data)
             assert(value == '-----BEGIN PGP SIGNATURE-----', 'malformed gpgsig')
 
             local before = after - #value
-            while pos <= len do
-                local _, after_nl = string.find(data, '[^\n]*\n ', after)
-                if not after_nl then break end
-
-                after = after_nl + 1
-            end
+            _, after = string.find(data, '-----END PGP SIGNATURE-----\n ?', after) -- find end of last line
 
             commit.gpgsig = data:sub(before, after - 1):gsub('\n ', '\n')
         else
@@ -213,6 +210,9 @@ local function decode_commit(data)
     return commit
 end
 
+---@param kind string
+---@param data string
+---@return string
 local function enframe(kind, data)
     assert(type(kind) == 'string', 'kind must be a string')
     assert(type(data) == 'string', 'data must be a string')
@@ -220,7 +220,11 @@ local function enframe(kind, data)
     return string.format('%s %d\0%s', kind, #data, data)
 end
 
+---@param framed string
+---@return string, string
 local function deframe(framed)
+    assert(type(framed) == 'string', 'framed must be a string')
+
     local _, after, kind, len = string.find(framed, '^(%S+) (%d+)%z')
     assert(kind, 'malformed frame')
 
@@ -229,7 +233,12 @@ local function deframe(framed)
     return kind, data
 end
 
-local function to_object(kind, data)
+---@param kind string
+---@param data any
+---@return string
+local function encode(kind, data)
+    assert(type(data) == 'string', 'data must be a string')
+
     local encoded
 
     if kind == 'commit' then
@@ -251,9 +260,12 @@ local function to_object(kind, data)
     return compressed
 end
 
-local function from_object(compressed)
-    local framed = miniz.decompress(compressed)
-    local kind, data = deframe(framed)
+---@param data string
+---@param kind string
+---@return any
+local function decode(data, kind)
+    assert(type(data) == 'string', 'data must be a string')
+    assert(type(kind) == 'string', 'kind must be a string')
 
     local decoded
     if kind == 'commit' then
@@ -268,21 +280,22 @@ local function from_object(compressed)
         error('unknown object kind: ' .. kind)
     end
 
-    return kind, decoded
+    return decoded
 end
 
 --- Reads a hash from a string. The hash can be in binary or hex format.
 --- @param data string
 --- @return string
 local function read_hash(data)
-    local line = data:match('^([^\n]+)')
-
-    if #line == hash_length then
-        return (line:gsub('.', bin2hex))
-    elseif #line == hash_length * 2 then
-        return line
+    if #data == hash_length then
+        return (data:gsub('.', bin2hex))
     else
-        error('malformed hash')
+        local line = data:match('^([^\n]+)')
+        if #line == hash_length * 2 then
+            return line
+        else
+            error('malformed hash')
+        end
     end
 end
 
@@ -300,4 +313,11 @@ local function write_hash(hash, is_hex)
     end
 end
 
-return {encode = to_object, decode = from_object, read_hash = read_hash, write_hash = write_hash}
+return {
+    encode = encode,
+    decode = decode,
+    read_hash = read_hash,
+    write_hash = write_hash,
+    deframe = deframe,
+    enframe = enframe
+}

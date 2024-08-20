@@ -1,9 +1,12 @@
 local bit = require('bit')
-local ffi = require('ffi')
+local miniz = require('miniz')
 
+local ffi = require('ffi')
 local zero = ffi.cast('uint64_t', 0)
 
-local function read_varint(data, offset)
+local object = require('object')
+
+local function read_varsize(data, offset)
     local byte = data:byte(offset)
     local result = bit.band(byte, 0x7f) + zero
     local shift = 7
@@ -11,13 +14,29 @@ local function read_varint(data, offset)
 
     while bit.band(byte, 0x80) > 0 do
         byte = data:byte(offset)
-        result = bit.lshift(result, shift)
-        result = result + bit.band(byte, 0x7f)
+        local value = bit.lshift(bit.band(byte, 0x7f), shift)
+        result = result + value
+
         shift = shift + 7
         offset = offset + 1
     end
 
-    return result, offset
+    return tonumber(result), offset
+end
+
+local function read_varoffset(data, offset)
+    local byte = data:byte(offset)
+    local result = bit.band(byte, 0x7f) + zero
+    offset = offset + 1
+
+    while bit.band(byte, 0x80) > 0 do
+        byte = data:byte(offset)
+
+        result = bit.lshift(result + 1, 7) + bit.band(byte, 0x7f)
+        offset = offset + 1
+    end
+
+    return tonumber(result), offset
 end
 
 local function read_u32(data, offset)
@@ -29,87 +48,158 @@ local function read_u64(data, offset)
     local high = read_u32(data, offset)
     local low = read_u32(data, offset + 4)
 
-    return bit.lshift(high + zero, 32) + low
+    return low + high * 0x100000000
+end
+
+local function apply_delta_instruction(parts, delta, delta_offset, base)
+    local instruction = delta:byte(delta_offset)
+    delta_offset = delta_offset + 1
+
+    if instruction < 0x80 then
+        -- data instruction
+        assert(instruction > 0, 'invalid data instruction')
+
+        table.insert(parts, delta:sub(delta_offset, delta_offset + instruction - 1))
+        delta_offset = delta_offset + instruction
+    else
+        -- copy instruction
+        local copy_offset = 0
+        local copy_length = 0
+
+        if bit.band(instruction, 0x01) > 0 then
+            copy_offset = delta:byte(delta_offset)
+            delta_offset = delta_offset + 1
+        end
+        if bit.band(instruction, 0x02) > 0 then
+            copy_offset = copy_offset + delta:byte(delta_offset) * 0x100
+            delta_offset = delta_offset + 1
+        end
+        if bit.band(instruction, 0x04) > 0 then
+            copy_offset = copy_offset + delta:byte(delta_offset) * 0x10000
+            delta_offset = delta_offset + 1
+        end
+        if bit.band(instruction, 0x08) > 0 then
+            copy_offset = copy_offset + delta:byte(delta_offset) * 0x1000000
+            delta_offset = delta_offset + 1
+        end
+        if bit.band(instruction, 0x10) > 0 then
+            copy_length = delta:byte(delta_offset)
+            delta_offset = delta_offset + 1
+        end
+        if bit.band(instruction, 0x20) > 0 then
+            copy_length = copy_length + delta:byte(delta_offset) * 0x100
+            delta_offset = delta_offset + 1
+        end
+        if bit.band(instruction, 0x40) > 0 then
+            copy_length = copy_length + delta:byte(delta_offset) * 0x10000
+            delta_offset = delta_offset + 1
+        end
+
+        -- copy_length == 0 means 0x10000 bytes
+        if copy_length == 0 then copy_length = 0x10000 end
+
+        assert(copy_offset <= #base, 'copy offset is out of bounds')
+        assert(copy_offset + copy_length <= #base, 'copy length is out of bounds')
+
+        table.insert(parts, base:sub(1 + copy_offset, copy_offset + copy_length))
+    end
+
+    return delta_offset
 end
 
 ---@class git.packfile
+---@field pack_hash string
 ---@field fs git.storage.fs
 ---@field pack_fd number
 ---@field fanout number[]
 ---@field hashes string[]
 ---@field checksums number[]
 ---@field offsets number[]
+---@field lengths number[]
 local packfile = {}
 
----@param fs git.storage.fs
----@param pack_fd number
----@param index_fd number
-local function load_packfile_from_fds(fs, pack_fd, index_fd)
-    assert(fs.read(pack_fd, 8, 0) == 'PACK\0\0\0\2', 'invalid packfile signature')
+function packfile:unload()
+    self.fs.close(self.pack_fd)
+end
+
+function packfile:reload_index()
+    local fs = self.fs
+    local index_fd = assert(fs.open('objects/pack/pack-' .. self.pack_hash .. '.idx', 'r', 0))
+
     assert(fs.read(index_fd, 8, 0) == '\255tOc\0\0\0\2', 'invalid pack index signature')
 
-    local fanout = {}
+    self.fanout = {}
     for i = 1, 256 do
         local offset = 4 * (i - 1)
-        fanout[i] = read_u32(assert(fs.read(index_fd, 4, 8 + offset), 1))
+        self.fanout[i] = read_u32(assert(fs.read(index_fd, 4, 8 + offset), 1))
     end
-
-    local pack_items = read_u32(assert(fs.read(pack_fd, 8, 4)))
-    assert(pack_items == fanout[256], 'packfile and index mismatch')
-
-    local index = {fanout = fanout, hashes = {}, checksums = {}, offsets = {}, pack_fd = pack_fd, fs = fs}
 
     local hashes_start = 8 + 4 * 256
-    for i = 1, fanout[256] do
+    for i = 1, self.fanout[256] do
         local offset = 20 * (i - 1)
-        index.hashes[i] = assert(fs.read(index_fd, 20, hashes_start + offset))
+        local binary_hash = assert(fs.read(index_fd, 20, hashes_start + offset))
+        self.hashes[i] = object.read_hash(binary_hash)
+
+        assert(i == 1 or self.hashes[i] > self.hashes[i - 1], 'hashes are not sorted') -- check if the hashes are sorted
+
+        -- check if the hash is in the correct fanout bucket
+        local first_byte = binary_hash:byte() + 1
+        assert(i <= self.fanout[first_byte] and i > (self.fanout[first_byte - 1] or 0),
+               'hash is in the wrong fanout bucket')
     end
 
-    local checksums_start = hashes_start + 20 * fanout[256]
-    for i = 1, fanout[256] do
+    local checksums_start = hashes_start + 20 * self.fanout[256]
+    for i = 1, self.fanout[256] do
         local offset = 4 * (i - 1)
-        index.checksums[i] = read_u32(assert(fs.read(index_fd, 4, checksums_start + offset)), 1)
+        self.checksums[i] = read_u32(assert(fs.read(index_fd, 4, checksums_start + offset)), 1)
     end
 
-    local long_offsets = {}
-    local offsets_start = checksums_start + 4 * fanout[256]
-    for i = 1, fanout[256] do
-        local offset = 4 * (i - 1)
-        index.offsets[i] = read_u32(assert(fs.read(index_fd, 4, offsets_start + offset)), 1)
+    local long_offsets = {} -- offsets[k] = long_offsets[v]
+    local long_offsets_num = 0
 
-        if index.offsets[i] > 0x7fffffff then long_offsets[#long_offsets + 1] = i end
+    local offsets_start = checksums_start + 4 * self.fanout[256]
+    for i = 1, self.fanout[256] do
+        local offset = 4 * (i - 1)
+        self.offsets[i] = read_u32(assert(fs.read(index_fd, 4, offsets_start + offset)), 1)
+
+        if self.offsets[i] > 0x7fffffff then
+            local long_offsets_index = bit.band(self.offsets[i], 0x7fffffff) + 1
+
+            long_offsets[long_offsets_index] = i
+            long_offsets_num = math.max(long_offsets_num, long_offsets_index)
+        end
     end
 
     local long_offsets_start = offsets_start + 4 * #long_offsets
-    for _, i in ipairs(long_offsets) do
+    for i = 1, long_offsets_num do
+        local j = long_offsets[i]
+        assert(j, 'extraneous long offset provided')
+
         local offset = 8 * (i - 1)
-        index.offsets[i] = read_u64(assert(fs.read(index_fd, 8, long_offsets_start + offset)), 1)
+        self.offsets[j] = read_u64(assert(fs.read(index_fd, 8, long_offsets_start + offset)), 1)
+    end
+
+    local sorted_offsets = {}
+    for i = 1, self.fanout[256] do sorted_offsets[i] = self.offsets[i] end
+
+    local packfile_size = fs.fstat(self.pack_fd).size
+
+    table.sort(sorted_offsets)
+    for i = 1, self.fanout[256] do
+        local start_offset = sorted_offsets[i]
+        local end_offset = sorted_offsets[i + 1] or packfile_size
+
+        self.lengths[start_offset] = end_offset - start_offset
     end
 
     fs.close(index_fd)
-    return setmetatable(index, {__index = packfile})
-end
-
----@param fs git.storage.fs
----@param pack_hash string
-local function load_packfile(fs, pack_hash)
-    local pack_fd, pack_err = fs.open('objects/pack/pack-' .. pack_hash .. '.pack', 'r', 0)
-    assert(pack_fd, pack_err)
-
-    local index_fd, index_err = fs.open('objects/pack/pack-' .. pack_hash .. '.idx', 'r', 0)
-    if not index_fd then
-        fs.close(pack_fd)
-        error(index_err)
-    end
-
-    return load_packfile_from_fds(fs, pack_fd, index_fd)
 end
 
 ---@param hash string
-function packfile:find_offset(hash)
+function packfile:find_hash(hash)
     local start_byte = tonumber(hash:sub(1, 2), 16) + 1
 
-    local hash_search_start = self.fanout[start_byte - 1] or 1
+    local hash_search_start = (self.fanout[start_byte - 1] or 0) + 1
     local hash_search_end = self.fanout[start_byte]
 
     local hash_offset = -1 -- binary search through the hashes
@@ -128,31 +218,96 @@ function packfile:find_offset(hash)
     end
 
     if hash_offset == -1 then return nil end
-    return self.offsets[hash_offset]
+    return hash_offset
 end
 
 ---@param hash string
-function packfile:read(hash)
-    local offset = self:find_offset(hash)
-    if not offset then return nil end
+---@param repository git.repository
+function packfile:read(hash, repository)
+    local hash_offset = self:find_hash(hash)
+    if not hash_offset then return nil end
 
+    local file_offset = self.offsets[hash_offset]
+    return self:read_at_offset(file_offset, repository)
+end
+
+local type_to_name = {'commit', 'tree', 'blob', 'tag', 'offset_delta', 'ref_delta'}
+
+---@param pack_offset number
+---@param repository git.repository
+---@return string, string
+function packfile:read_at_offset(pack_offset, repository)
     local pack_fd = self.pack_fd
     local fs = self.fs
 
-    local header = assert(fs.read(pack_fd, 16, offset))
-    local first_byte = header:byte()
+    local chunk_length = self.lengths[pack_offset]
+    assert(chunk_length and chunk_length >= 0, 'chunk is missing length')
 
-    local type = bit.rshift(bit.band(first_byte, 0x70), 4)
-    local size = bit.band(first_byte, 0x0f)
+    local header = assert(fs.read(pack_fd, 32, pack_offset))
+    local type_and_size, header_offset = read_varsize(header, 1)
+    local type = bit.rshift(bit.band(type_and_size, 0x70), 4)
+    local uncompressed_size = bit.rshift(bit.band(type_and_size + zero, bit.bnot(0x7f + zero)), 3) +
+                                  bit.band(type_and_size, 0x0f)
 
-    if bit.band(first_byte, 0x80) > 0 then
-        local varsize, new_offset = read_varint(header, 2)
-        size = size + varsize * 16
+    if type == 1 or type == 2 or type == 3 or type == 4 then
+        local deflated_data = assert(fs.read(pack_fd, chunk_length, pack_offset + header_offset - 1))
+        local inflated_data = miniz.inflate(deflated_data, 1)
 
-        offset = offset + new_offset
+        assert(#inflated_data == uncompressed_size, 'inflated data size does not match expected size')
+        return type_to_name[type], inflated_data
+    elseif type == 6 or type == 7 then -- offset delta
+        local base_kind, base_data
+
+        if type == 6 then
+            local base_offset, delta_header_offset = read_varoffset(header, header_offset)
+
+            base_kind, base_data = self:read_at_offset(pack_offset - base_offset, repository)
+            header_offset = delta_header_offset
+
+            if not base_kind then error('offset delta base not found') end
+        elseif type == 7 then
+            local binary_ref = header:sub(header_offset, header_offset + 19)
+            local reference = object.read_hash(binary_ref)
+
+            base_kind, base_data = repository:load_raw(reference)
+            header_offset = header_offset + 20
+
+            if not base_kind then error('reference delta base not found') end
+        end
+
+        local parts = {}
+        local delta_offset = 1
+
+        local deflated_data =
+            assert(fs.read(pack_fd, chunk_length - header_offset + 1, pack_offset + header_offset - 1))
+        local delta_data = miniz.inflate(deflated_data, 1)
+
+        local base_size, result_size
+        base_size, delta_offset = read_varsize(delta_data, delta_offset)
+        result_size, delta_offset = read_varsize(delta_data, delta_offset)
+
+        assert(base_size == #base_data, 'base size does not match expected size')
+        while delta_offset <= #delta_data do
+            delta_offset = apply_delta_instruction(parts, delta_data, delta_offset, base_data)
+        end
+
+        local undeltified_data = table.concat(parts)
+        assert(#undeltified_data == result_size, 'inflated data size does not match expected size')
+
+        return base_kind, undeltified_data
     else
-        offset = offset + 1
+        error('invalid pack object type')
     end
-
-    
 end
+
+local function load_packfile(fs, pack_hash)
+    local pack = setmetatable({pack_hash = pack_hash, fs = fs, hashes = {}, checksums = {}, offsets = {}, lengths = {}},
+                              {__index = packfile})
+
+    pack.pack_fd = assert(fs.open('objects/pack/pack-' .. pack_hash .. '.pack', 'r', 0))
+    pack:reload_index()
+
+    return pack
+end
+
+return load_packfile
