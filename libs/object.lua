@@ -4,8 +4,28 @@ local miniz = require('miniz')
 local hash_length = 20 -- SHA1 hash is 20 bytes
 local hash_length_hex = hash_length * 2
 
-local function hex2bin(cc) return string.char(tonumber(cc, 16)) end
-local function bin2hex(c) return string.format('%02x', string.byte(c)) end
+local bin2hex_lookup = {}
+local hex2bin_lookup = {}
+for i = 0, 255 do
+    bin2hex_lookup[i] = string.format('%02x', i)
+    hex2bin_lookup[i] = string.char(i)
+end
+
+local function bin2hex(bin)
+    local hex = {}
+    for i = 1, #bin do
+        hex[i] = bin2hex_lookup[string.byte(bin, i)]
+    end
+    return table.concat(hex)
+end
+
+local function hex2bin(str)
+    local bin = {}
+    for i = 1, #str, 2 do
+        bin[#bin + 1] = hex2bin_lookup[tonumber(str:sub(i, i + 1), 16)]
+    end
+    return table.concat(bin)
+end
 
 local function mode_is_tree(mode)
     return mode == 0x4000 -- 0b0100_000_000000000
@@ -69,7 +89,7 @@ local function encode_tree(tree)
         assert(type(entry.hash) == 'string' and #entry.hash == hash_length,
                'entry.hash must be a hash string: ' .. entry.name)
 
-        local line = string.format('%o %s\0%s', entry.mode, entry.name, (entry.hash:gsub('..', hex2bin)))
+        local line = string.format('%o %s\0%s', entry.mode, entry.name, hex2bin(entry.hash))
 
         table.insert(result, line)
     end
@@ -142,7 +162,12 @@ local function decode_tree(data)
         assert(after, 'malformed tree object')
 
         mode = tonumber(mode, 8)
-        table.insert(tree, {mode = mode, name = name, hash = hash:gsub('.', bin2hex), kind = mode_to_name(mode)})
+        table.insert(tree, {
+            mode = mode,
+            name = name,
+            hash = bin2hex(hash),
+            kind = mode_to_name(mode) -- 
+        })
 
         pos = after + 1
     end
@@ -169,13 +194,8 @@ local function decode_commit(data)
     while pos <= len do
         local _, after, key, value = string.find(data, '^(%w+) ([^\n]+)\n', pos)
         if not after then
-            if data:sub(pos, pos) == '\n' then
-                commit.message = data:sub(pos + 1)
-                break
-            else
-                p(data)
-                error('malformed commit object')
-            end
+            commit.message = data:sub(pos)
+            break
         end
 
         if key == 'tree' then
@@ -194,10 +214,15 @@ local function decode_commit(data)
             commit.committer = decode_person(value)
         elseif key == 'gpgsig' then
             assert(not commit.gpgsig, 'malformed commit object')
-            assert(value == '-----BEGIN PGP SIGNATURE-----', 'malformed gpgsig')
-
             local before = after - #value
-            _, after = string.find(data, '-----END PGP SIGNATURE-----\n ?', after) -- find end of last line
+
+            if value == '-----BEGIN PGP SIGNATURE-----' then
+                _, after = string.find(data, '-----END PGP SIGNATURE-----\n ?', after)
+            elseif value == '-----BEGIN SSH SIGNATURE-----' then
+                _, after = string.find(data, '-----END SSH SIGNATURE-----\n ?', after)
+            else
+                error('malformed gpgsig')
+            end
 
             commit.gpgsig = data:sub(before, after - 1):gsub('\n ', '\n')
         else
@@ -226,6 +251,7 @@ local function deframe(framed)
     assert(type(framed) == 'string', 'framed must be a string')
 
     local _, after, kind, len = string.find(framed, '^(%S+) (%d+)%z')
+    if not kind then p(framed) end
     assert(kind, 'malformed frame')
 
     local data = framed:sub(after + 1)
@@ -288,10 +314,12 @@ end
 --- @return string
 local function read_hash(data)
     if #data == hash_length then
-        return (data:gsub('.', bin2hex))
+        return bin2hex(data)
     else
         local line = data:match('^([^\n]+)')
         if #line == hash_length * 2 then
+            if line:match('[^0-9a-fA-F]') then error('malformed hash') end
+
             return line
         else
             error('malformed hash')
@@ -306,8 +334,8 @@ end
 local function write_hash(hash, is_hex)
     assert(#hash == hash_length * 2, 'hash must be ' .. (hash_length * 2) .. ' bytes')
 
-    if is_hex then
-        return (hash:gsub('.', bin2hex))
+    if not is_hex then
+        return bin2hex(hash)
     else
         return hash
     end

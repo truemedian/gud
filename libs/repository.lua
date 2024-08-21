@@ -1,21 +1,20 @@
+local openssl = require('openssl')
+
 local object = require('object')
 local packfile = require('packfile')
 
 ---@class git.repository
 ---@field storage git.storage
 ---@field packs table<string, git.packfile>
----@field object_cache table<string, any>
 local repository = {}
 
 function repository:reload_index()
-    for _, pack in pairs(self.packs) do pack:unload() end
-
     self.packs = {}
     for item in self.storage.fs.scandir('objects/pack') do
         if item.name:sub(-5) == '.pack' then
             local hash = item.name:sub(6, -6)
 
-            local pack = packfile(self.storage.fs, hash)
+            local pack = packfile(self.storage, hash)
             self.packs[hash] = pack
         end
     end
@@ -40,15 +39,17 @@ function repository:load_raw(hash)
     local loose_data = self.storage:read(loose_path)
     if loose_data then
         local kind, data = object.deframe(loose_data)
-        self.object_cache[hash] = data
+        assert(openssl.digest.digest('sha1', data) == hash, 'object does not match hash')
 
         return kind, data
     end
 
     for _, pack in pairs(self.packs) do
         local kind, data = pack:read(hash, self)
+
         if kind and data then
-            self.object_cache[hash] = data
+            local enframed = object.enframe(kind, data)
+            assert(openssl.digest.digest('sha1', enframed) == hash, 'object does not match hash')
 
             return kind, data
         end
@@ -132,8 +133,8 @@ function repository:tags()
         local hash, name, after = packed_refs:match('(%x+) refs/tags/(%S+)\n()', pos)
         if not hash then return end
 
-        pos = after + 1
-        return name, hash
+        pos = after
+        return name, object.read_hash(hash)
     end
 
     local scan
@@ -158,12 +159,7 @@ function repository:tags()
 end
 
 return function(storage)
-    local repo = setmetatable({
-        storage = assert(storage),
-        packs = {},
-        object_cache = setmetatable({}, {__mode = "kv"}),
-        object_store = setmetatable({}, {__mode = "kv"})
-    }, {__index = repository}) -- create wrapped storage
+    local repo = setmetatable({storage = assert(storage), packs = {}}, {__index = repository})
 
     repo:reload_index()
     return repo
