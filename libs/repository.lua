@@ -2,6 +2,7 @@ local openssl = require('openssl')
 
 local object = require('object')
 local packfile = require('packfile')
+local miniz = require('miniz')
 
 ---@class git.repository
 ---@field storage git.storage
@@ -10,9 +11,11 @@ local repository = {}
 
 function repository:reload_index()
     self.packs = {}
-    for item in self.storage.fs.scandir('objects/pack') do
-        if item.name:sub(-5) == '.pack' then
-            local hash = item.name:sub(6, -6)
+    if not self.storage:access('objects/pack') then return end
+
+    for name in self.storage:leaves('objects/pack') do
+        if name:sub(-5) == '.pack' then
+            local hash = name:sub(6, -6)
 
             local pack = packfile(self.storage, hash)
             self.packs[hash] = pack
@@ -38,9 +41,10 @@ function repository:load_raw(hash)
     local loose_path = 'objects/' .. hash:sub(1, 2) .. '/' .. hash:sub(3)
     local loose_data = self.storage:read(loose_path)
     if loose_data then
-        local kind, data = object.deframe(loose_data)
-        assert(openssl.digest.digest('sha1', data) == hash, 'object does not match hash')
+        local inflated = miniz.inflate(loose_data, 1)
+        assert(openssl.digest.digest('sha1', inflated) == hash, 'object does not match hash')
 
+        local kind, data = object.deframe(inflated)
         return kind, data
     end
 
@@ -87,75 +91,70 @@ function repository:getReference(ref)
 end
 
 function repository:branches()
-    local scanner = self.storage:nodes('refs/heads')
-    local packed_refs = self.storage:read('packed-refs')
+    local function iterate()
+        for name in self.storage:leaves('refs/heads') do
+            local hash = self.storage:read('refs/heads/' .. name)
 
-    local pos = 1
-    local function scan_packed()
+            if hash then coroutine.yield(name, object.read_hash(hash)) end
+        end
+
+        local packed_refs = self.storage:read('packed-refs')
         if not packed_refs then return end
 
-        local hash, name, after = packed_refs:match('(%x+) refs/heads/(%S+)\n()', pos)
-        if not hash then return end
-
-        pos = after
-        return name, object.read_hash(hash)
+        for hash, name in packed_refs:gmatch('(%x+) refs/heads/(%S+)\n') do
+            coroutine.yield(name, object.read_hash(hash))
+        end
     end
 
-    local scan
-    local function scan_unpacked()
-        local item = scanner()
-        if not item then
-            scan = scan_packed
-            return scan()
-        end
-
-        local hash = self.storage:read('refs/heads/' .. item.name)
-        if not hash then
-            scan = scan_packed
-            return scan()
-        end
-
-        return item.name, object.read_hash(hash)
-    end
-
-    scan = scan_unpacked
-    return function() return scan() end
+    return coroutine.wrap(iterate)
 end
 
 function repository:tags()
-    local scanner = self.storage:nodes('refs/tags')
-    local packed_refs = self.storage:read('packed-refs')
+    local function iterate()
+        for name in self.storage:leaves('refs/tags') do
+            local hash = self.storage:read('refs/tags/' .. name)
 
-    local pos = 1
-    local function scan_packed()
+            if hash then coroutine.yield(name, object.read_hash(hash)) end
+        end
+
+        local packed_refs = self.storage:read('packed-refs')
         if not packed_refs then return end
 
-        local hash, name, after = packed_refs:match('(%x+) refs/tags/(%S+)\n()', pos)
-        if not hash then return end
-
-        pos = after
-        return name, object.read_hash(hash)
+        for hash, name in packed_refs:gmatch('(%x+) refs/tags/(%S+)\n') do
+            coroutine.yield(name, object.read_hash(hash))
+        end
     end
 
-    local scan
-    local function scan_unpacked()
-        local item = scanner()
-        if not item then
-            scan = scan_packed
-            return scan()
+    return coroutine.wrap(iterate)
+end
+
+function repository:remote_branches()
+    local function iterate()
+        for remote_name in self.storage:leaves('refs/remotes') do
+            for name in self.storage:leaves('refs/remotes/' .. remote_name) do
+                local remote_and_name = remote_name .. '/' .. name
+                local hash = self.storage:read('refs/remotes/' .. remote_and_name)
+
+                if hash then
+                    if hash:sub(1, 5) == 'ref: ' then
+                        local other = self.storage:read(hash:sub(6))
+                        if other then coroutine.yield(remote_and_name, object.read_hash(other)) end
+                    else
+                        coroutine.yield(remote_and_name, object.read_hash(hash))
+                    end
+                end
+            end
         end
 
-        local hash = self.storage:read('refs/tags/' .. item.name)
-        if not hash then
-            scan = scan_packed
-            return scan()
-        end
+        local packed_refs = self.storage:read('packed-refs')
+        if not packed_refs then return end
 
-        return item.name, object.read_hash(hash)
+        for hash, name in packed_refs:gmatch('(%x+) refs/remotes/(%S+)\n') do
+            coroutine.yield(name, object.read_hash(hash))
+        end
     end
 
-    scan = scan_unpacked
-    return function() return scan() end
+    return coroutine.wrap(iterate)
 end
 
 return function(storage)

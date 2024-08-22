@@ -257,6 +257,7 @@ function packfile:read_at_offset(pack_offset, repository)
 
         local deflated_data = pack:sub(header_offset, header_offset + chunk_length)
         local delta_data = miniz.inflate(deflated_data, 1)
+        assert(#delta_data > 0, 'delta data is empty')
 
         local base_size, result_size
         base_size, delta_offset = read_varsize(delta_data, delta_offset)
@@ -315,7 +316,6 @@ function packfile:read_at_offset(pack_offset, repository)
 
                 table.insert(parts, base_data:sub(1 + copy_offset, copy_offset + copy_length))
             end
-
         end
 
         local undeltified_data = table.concat(parts)

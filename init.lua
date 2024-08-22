@@ -1,8 +1,7 @@
 local repository = require('repository')
 local storage = require('storage')
 
-local fs = require('coro-fs').chroot('/code/repositories/github/truemedian/zig/.git')
-local this_storage = storage(fs)
+local this_storage = storage('H:/repositories/truemedian/zig/.git')
 local repo = repository(this_storage)
 -- local repo = require('git').mount(fs)
 
@@ -50,18 +49,31 @@ local function recursively_iterate(r, hash)
     if n % 10000 == 0 then print(n, #to_check) end
 end
 
-local p = require('jit.p')
-p.start('F3i0a')
+-- local p = require('jit.p')
+-- p.start('F3i0a')
 
 print('start', tot)
 local start = os.clock()
 
-for k, v in repo:tags() do recursively_iterate(repo, v) end
+for k, v in repo:tags() do
+    print(k, v)
+    recursively_iterate(repo, v)
+end
+
+for k, v in repo:branches() do
+    print(k, v)
+    recursively_iterate(repo, v)
+end
+
+for k, v in repo:remote_branches() do
+    print(k, v)
+    recursively_iterate(repo, v)
+end
+
 -- for k, v in repo.leaves('refs/tags') do
 --     recursively_iterate(repo, repo.getRef('refs/tags/' .. k))
 -- end
 
-for k, v in repo:branches() do recursively_iterate(repo, v) end
 -- for k, v in repo.leaves('refs/heads') do
 --     recursively_iterate(repo, repo.getRef('refs/heads/' .. k))
 -- end
@@ -71,4 +83,4 @@ while #to_check > 0 do recursively_iterate(repo, table.remove(to_check, #to_chec
 local stop = os.clock()
 local taken = stop - start
 print(taken, n, taken / n * 1000)
-p.stop()
+-- p.stop()
