@@ -1,7 +1,7 @@
 local openssl = require('openssl')
 
----@class git.oid : string.buffer
----@class git.oid_binary : string.buffer
+---@class git.oid : string
+---@class git.oid_binary : string
 
 ---@class git.oid_type
 ---@field algorithm string
@@ -12,32 +12,37 @@ local oid_type = {}
 local hex_alphabet = {}
 for i = 0, 255 do hex_alphabet[i] = string.format('%02x', i) end
 
----@param buf string.buffer
----@param bin git.oid_binary
+---@param binhash git.oid_binary
 ---@return git.oid
-function oid_type:bin2hex(buf, bin)
+function oid_type:bin2hex(binhash)
+    assert(#binhash == self.bin_length, 'invalid object id')
+    local buffer = {}
+
     for i = 1, self.bin_length do
-        local byte = string.byte(bin:get(1))
-        buf:put(hex_alphabet[byte])
+        local byte = string.byte(binhash:sub(i, i))
+        buffer[i] = hex_alphabet[byte]
     end
 
-    return buf
+    return table.concat(buffer) ---@type git.oid
 end
 
----@param buf string.buffer
 ---@param hexhash git.oid
 ---@return git.oid_binary
-function oid_type:hex2bin(buf, hexhash)
+function oid_type:hex2bin(hexhash)
+    assert(#hexhash == self.hex_length, 'invalid object id')
+    local buffer = {}
+
     for i = 1, self.hex_length, 2 do
-        local byte = tonumber(hexhash:get(2), 16)
-        buf:put(string.char(byte))
+        local byte = tonumber(hexhash:sub(i, i + 1), 16)
+        buffer[(i + 1) / 2] = string.char(byte)
     end
 
-    return buf
+    return table.concat(buffer) ---@type git.oid_binary
 end
 
 ---@param data string
 ---@param kind? string
+---@return git.oid
 function oid_type:digest(data, kind)
     if kind then
         local digest = openssl.digest.new(oid_type.algorithm)

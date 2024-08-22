@@ -44,8 +44,10 @@ function odb:refresh() for i = 1, #self.backends do self.backends[i]:refresh() e
 --- the object will be used.
 ---@param data string
 ---@param kind git.object.kind
+---@return git.oid|nil, string|nil
 function odb:write(data, kind)
     local oid = self.oid_type:digest(data, kind)
+
     for i = 1, #self.backends do
         if self.backends[i]:write(oid, data, kind) then
             return oid -- write succeeded, return the oid that was written

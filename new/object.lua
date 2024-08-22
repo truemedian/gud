@@ -3,5 +3,12 @@
 
 ---@class git.object
 ---@field kind git.object.kind
----@field data string
+---@field data string.buffer
 local object = {}
+local object_mt = {__index = object}
+
+function object.create(o)
+    return setmetatable(o, object_mt)
+end
+
+return object
