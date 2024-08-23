@@ -3,9 +3,8 @@ local fs = require('fs')
 
 local object = require('../object.lua')
 
----@class git.odb.backend_loose : git.odb.backend
+---@class git.odb.backend.loose : git.odb.backend
 ---@field objects_dir string
----@field cache table<git.oid, git.object>
 local backend_loose = {}
 local backend_loose_mt = {__index = backend_loose}
 
@@ -17,15 +16,12 @@ local function oid_path(objects_dir, oid) return objects_dir .. '/' .. oid:sub(1
 function backend_loose.load(objects_dir)
     return setmetatable({
         objects_dir = assert(objects_dir, 'missing objects directory'),
-        cache = setmetatable({}, {__mode = 'v'})
     }, backend_loose_mt)
 end
 
 ---@param oid git.oid
 ---@return git.object|nil, string|nil
 function backend_loose:read(oid)
-    if self.cache[oid] then return self.cache[oid] end
-
     local path = oid_path(self.objects_dir, oid)
     if not fs.accessSync(path) then
         -- fail early if the object doesn't exist
@@ -43,7 +39,6 @@ function backend_loose:read(oid)
     assert(#data == tonumber(size), 'invalid object size')
     local obj = object.create {kind = kind, data = data}
 
-    self.cache[oid] = obj
     return obj
 end
 
