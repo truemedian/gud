@@ -44,10 +44,10 @@ function backend_onepack.load(odb, objects_dir)
     local packfile_path = pack_path(self.objects_dir, self.pack_hash)
 
     idx, err = fs.readFileSync(index_path)
-    if err then return nil, err end
+    if not idx then return nil, err end
 
     pack, err = fs.readFileSync(packfile_path)
-    if err then return nil, err end
+    if not pack then return nil, err end
 
     self.packfile = pack
     assert(idx:sub(1, 8) == '\xfftOc\x00\x00\x00\x02', 'invalid packfile index signature')
@@ -107,13 +107,19 @@ end
 
 ---@param oid git.oid
 ---@return git.object|nil, string|nil
-function backend_onepack:read(oid) end
+function backend_onepack:read(odb, oid) end
 
 ---@param oid git.oid
 ---@return git.object.kind|nil, number|string
 function backend_onepack:read_header(oid)
     local offset = self:_find_offset(oid)
     if not offset then return nil, 'object not found in database' end
+
+    
+end
+
+function backend_onepack:_read_at_offset(odb, offset)
+    local chunk_length = assert(self.lengths[offset], 'packfile index missing length at ' .. offset)
 
     
 end
