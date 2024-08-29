@@ -105,13 +105,13 @@ function object:parse_commit()
 
     local commit = {parents = {}}
     local pos = 1
-    local _, stop = self.data:find('\n\n', pos, true)
+    local stop = self.data:find('\n\n', pos, true)
 
     while pos <= stop do
-        local name, value_start = self.data:match('^(%w+) ()', pos)
+        local name, value_start = self.data:match('^(%S+) ()', pos)
         assert(value_start, 'invalid commit format')
 
-        local value_end = self.data:match('\n()%w', value_start)
+        local value_end = self.data:match('\n()[%S\n]', value_start)
         if not value_end then
             value_end = stop
         end
@@ -129,10 +129,18 @@ function object:parse_commit()
             commit.committer = decode_person(value)
         elseif name == 'gpgsig' then
             commit.gpgsig = value:gsub('\n ', '\n')
+        elseif name == 'HG:rename-source' then
+            -- ignore
+        elseif name == 'mergetag' then
+            -- ignore
         else
             error('unknown commit field: ' .. name)
         end
     end
+
+    assert(commit.tree, 'missing tree field in commit object')
+    assert(commit.author, 'missing author field in commit object')
+    assert(commit.committer, 'missing committer field in commit object')
 
     commit.message = self.data:sub(stop + 1)
     return commit
@@ -145,7 +153,7 @@ function object:parse_tag()
     local pos = 1
     local _, stop = self.data:find('\n\n', pos, true)
 
-    while pos <= stop do
+    while pos < stop do
         local name, value_start = self.data:match('^(%w+) ()', pos)
         assert(value_start, 'invalid tag format')
 
@@ -169,6 +177,11 @@ function object:parse_tag()
             error('unknown tag field: ' .. name)
         end
     end
+
+    assert(tag.object, 'missing object field in tag object')
+    assert(tag.type, 'missing type field in tag object')
+    assert(tag.tagger, 'missing tagger field in tag object')
+    assert(tag.tag, 'missing tag field in tag object')
 
     tag.message = self.data:sub(stop + 1)
     return tag

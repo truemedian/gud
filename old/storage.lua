@@ -32,7 +32,6 @@ local function basename(path) return path:match('.+[/\\]([^/\\]*)$') or path end
 local fs = require('fs')
 local posix_path = require('path/base').posix
 
----@class git.storage
 ---@field chroot string
 local storage = {}
 

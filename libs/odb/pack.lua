@@ -1,135 +1,99 @@
 local miniz = require('miniz')
 local fs = require('fs')
 
-local common = require('../common.lua')
-local object = require('../object.lua')
+local common = require('common')
+local object = require('object')
+
+local backend_onepack = require('odb/one_pack')
 
 ---@class git.odb.backend.pack : git.odb.backend
 ---@field objects_dir string
----@field packs table<string, git.odb.pack>
+---@field packs table<string, git.odb.backend.one_pack>
 local backend_pack = {}
 local backend_pack_mt = {__index = backend_pack}
 
+---@param objects_dir string
+---@param pack_hash string
+---@return string
 local function pack_path(objects_dir, pack_hash)
     return objects_dir .. '/pack/pack-' .. pack_hash .. '.pack'
 end
+
+---@param objects_dir string
+---@param pack_hash string
+---@return string
 local function idx_path(objects_dir, pack_hash)
     return objects_dir .. '/pack/pack-' .. pack_hash .. '.idx'
 end
 
+---@param odb git.odb
 ---@param objects_dir string
-function backend_pack.load(objects_dir)
-    return setmetatable({objects_dir = assert(objects_dir, 'missing objects directory')}, backend_pack_mt)
+---@return git.odb.backend.pack|nil, nil|string
+function backend_pack.load(odb, objects_dir)
+    local self = setmetatable({objects_dir = assert(objects_dir, 'missing objects directory')}, backend_pack_mt)
+
+    self.packs = {}
+    for name, kind in fs.scandirSync(objects_dir .. '/pack') do
+        local hash = name:match('^pack%-(%x+)%.pack$')
+        if hash and kind == 'file' then
+            self.packs[hash] = assert(backend_onepack.load(odb, objects_dir, hash))
+        end
+    end
+
+    return self
 end
 
+---@param odb git.odb
 ---@param oid git.oid
----@return git.object|nil, string|nil
-function backend_pack:read(oid)
+---@return git.object|nil, nil|string
+function backend_pack:read(odb, oid)
+    for _, pack in pairs(self.packs) do
+        local obj = pack:read(odb, oid)
+        if obj then
+            return obj
+        end
+    end
+
+    return nil, 'object not found in database'
 end
 
+---@param odb git.odb
 ---@param oid git.oid
 ---@return git.object.kind|nil, number|string
-function backend_pack:read_header(oid)
+function backend_pack:read_header(odb, oid)
+    for _, pack in pairs(self.packs) do
+        local kind, size = pack:read_header(odb, oid)
+        if kind then
+            return kind, size
+        end
+    end
+
+    return nil, 'object not found in database'
 end
 
+---@param odb git.odb
 ---@param oid git.oid
----@return boolean, string|nil
-function backend_pack:exists(oid)
+---@return boolean, nil|string
+function backend_pack:exists(odb, oid)
+    for _, pack in pairs(self.packs) do
+        if pack:exists(odb, oid) then
+            return true
+        end
+    end
+
+    return false
 end
 
 ---@param odb git.odb
 function backend_pack:refresh(odb)
-    for entry in fs.scandirSync(self.objects_dir .. '/pack') do
-        local pack_hash = entry.name:match('^pack%-(%x+)%.pack$')
-        if pack_hash then
-            self:_load_index(odb, pack_hash)
-        end
-    end
-end
-
----@param odb git.odb
----@param pack_hash git.oid
-function backend_pack:_load_index(odb, pack_hash)
-    local idx, pack, err
-
-    local index_path = idx_path(self.objects_dir, pack_hash)
-    local packfile_path = pack_path(self.objects_dir, pack_hash)
-
-    idx, err = fs.readFileSync(index_path)
-    if err then
-        return nil, err
-    end
-
-    pack, err = fs.readFileSync(packfile_path)
-    if err then
-        return nil, err
-    end
-
-    local index = {fanout = {}, hashes = {}, offsets = {}, lengths = {}}
-
-    assert(idx:sub(1, 8) == '\xfftOc\x00\x00\x00\x02', 'invalid packfile index signature')
-
-    local fanout_start = 9
-    for i = 0, 255 do
-        index.fanout[i + 1] = common.read_u32be(idx, fanout_start + i * 4)
-    end
-
-    local hashes_start = fanout_start + 256 * 4
-    for i = 0, index.fanout[256] - 1 do
-        local offset = hashes_start + i * 20
-
-        local binhash = idx:sub(offset, offset + 19)
-        index.hashes[i + 1] = odb.oid_type:bin2hex(binhash)
-
-        assert(i == 0 or index.hashes[i + 1] > index.hashes[i], 'packfile index is not sorted')
-
-        local first_byte = binhash:byte() + 1
-        assert(i >= (index.fanout[first_byte - 1] or 0) and i < index.fanout[first_byte], 'packfile index is corrupt')
-    end
-
-    local long_offset_needed = {n = 0}
-
-    local checksums_start = hashes_start + index.fanout[256] * 20
-    local offsets_start = checksums_start + index.fanout[256] * 4
-    for i = 0, index.fanout[256] - 1 do
-        local offset = offsets_start + i * 4
-        index.offsets[i + 1] = common.read_u32be(idx, offset)
-
-        if index.offsets[i + 1] > 0x7fffffff then
-            local long_index = bit.band(index.offsets[i + 1], 0x7fffffff)
-            long_offset_needed[long_index] = i + 1
-            long_offset_needed.n = math.max(long_offset_needed.n, long_index)
-        end
-    end
-
-    local lengths_start = offsets_start + index.fanout[256] * 4
-    for i = 0, long_offset_needed.n do
-        local j = long_offset_needed[i]
-        assert(j, 'packfile index has extraneous long offset')
-
-        local offset = lengths_start + i * 8
-        index.offsets[j] = common.read_u32be(idx, offset)
-    end
-
-    local sorted_offsets = {}
-    for i = 1, index.fanout[256] do
-        sorted_offsets[i] = index.offsets[i]
-    end
-    table.sort(sorted_offsets)
-
-    for i = 1, index.fanout[256] do
-        local start = sorted_offsets[i]
-        local stop = sorted_offsets[i + 1] or #pack
-        index.lengths[i] = stop - start
-    end
-
 end
 
 ---@param oid git.oid
 ---@param data string
 ---@param kind git.object.kind
----@return boolean, string|nil
+---@return boolean, nil|string
 function backend_pack:write(oid, data, kind)
+    return false
 end
 
 return backend_pack

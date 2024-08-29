@@ -1,7 +1,7 @@
 local miniz = require('miniz')
 local fs = require('fs')
 
-local object = require('../object.lua')
+local object = require('object')
 
 ---@class git.odb.backend.loose : git.odb.backend
 ---@field objects_dir string

@@ -51,7 +51,6 @@ local function read_u64(data, offset)
     return low + high * 0x100000000
 end
 
----@class git.packfile
 ---@field pack_hash string
 ---@field storage git.storage
 ---@field pack string

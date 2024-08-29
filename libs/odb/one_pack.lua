@@ -1,13 +1,13 @@
 local miniz = require('miniz')
 local fs = require('fs')
 
-local common = require('../common.lua')
-local object = require('../object.lua')
+local common = require('common')
+local object = require('object')
 
 ---@class git.odb.backend.one_pack : git.odb.backend
 ---@field objects_dir string
 ---@field pack_hash string
----@field packfile string
+---@field packfile git.buffer
 ---@field fanout integer[]
 ---@field hashes git.oid[]
 ---@field hashes_lookup table<integer, git.oid>
@@ -34,18 +34,18 @@ end
 ---@param value git.oid
 ---@param start integer
 ---@param stop integer
----@return integer
+---@return integer|nil
 local function binsearch(arr, value, start, stop)
     while start < stop do
         local mid = math.floor((start + stop) / 2)
         if arr[mid] < value then
             start = mid + 1
-        else
+        elseif arr[mid] > value then
             stop = mid
+        else
+            return mid
         end
     end
-
-    return start
 end
 
 ---@param num integer
@@ -73,18 +73,19 @@ function backend_onepack.load(odb, objects_dir, pack_hash)
     local index_path = idx_path(self.objects_dir, self.pack_hash)
     local packfile_path = pack_path(self.objects_dir, self.pack_hash)
 
-    idx, err = fs.readFileSync(index_path)
+    idx, err = common.read_file(index_path, true)
     if not idx then
         return nil, err
     end
 
-    pack, err = fs.readFileSync(packfile_path)
+    assert(idx:sub(1, 8) == '\xfftOc\x00\x00\x00\x02', 'invalid packfile index signature')
+
+    pack, err = common.read_file(packfile_path, true)
     if not pack then
         return nil, err
     end
 
     self.packfile = pack
-    assert(idx:sub(1, 8) == '\xfftOc\x00\x00\x00\x02', 'invalid packfile index signature')
 
     self.fanout = {}
     self.hashes = {}
@@ -131,7 +132,7 @@ function backend_onepack.load(odb, objects_dir, pack_hash)
         assert(j, 'packfile index has extraneous long offset')
 
         local offset = lengths_start + i * 8
-        self.offsets[j] = common.read_u32be(idx, offset)
+        self.offsets[j] = common.read_u64be(idx, offset)
     end
 
     local sorted_offsets = {}
@@ -142,7 +143,7 @@ function backend_onepack.load(odb, objects_dir, pack_hash)
 
     for i = 1, self.fanout[256] do
         local start = sorted_offsets[i]
-        local stop = sorted_offsets[i + 1] or #pack
+        local stop = sorted_offsets[i + 1] or pack.size
         self.lengths[start] = stop - start
 
         self.hashes_lookup[self.offsets[i]] = self.hashes[i]
@@ -190,7 +191,7 @@ function backend_onepack:_read_at_offset(odb, offset)
     local kind, uncompressed_size = unpack_type_and_size(kind_and_size)
 
     if kind == 1 or kind == 2 or kind == 3 or kind == 4 then
-        local deflated_data = self.packfile:sub(header_offset, header_offset + chunk_length)
+        local deflated_data = self.packfile:sub(header_offset, offset + chunk_length)
         local inflated_data = miniz.inflate(deflated_data, 1)
         assert(#inflated_data == uncompressed_size, 'inflated object does not match expected size')
 
@@ -214,7 +215,7 @@ function backend_onepack:_read_at_offset(odb, offset)
         if kind == 6 then
             local base_offset
             base_offset, header_offset = common.read_pack_varoffset(self.packfile, header_offset)
-            base_object = self:_read_at_offset(odb, base_offset)
+            base_object = self:_read_at_offset(odb, offset - base_offset)
         elseif kind == 7 then
             local binary_ref = self.packfile:sub(header_offset, header_offset + odb.oid_type.bin_length - 1) ---@cast binary_ref git.oid_binary
             header_offset = header_offset + odb.oid_type.bin_length
@@ -224,16 +225,18 @@ function backend_onepack:_read_at_offset(odb, offset)
         end
 
         assert(base_object, 'packed delta base object not found')
-        local deflated_data = self.packfile:sub(header_offset, header_offset + chunk_length)
+        local deflated_data = self.packfile:sub(header_offset, offset + chunk_length)
         local delta_data = miniz.inflate(deflated_data, 1)
         local delta_offset = 1
 
+        assert(#delta_data == uncompressed_size, 'delta object does not match expected size')
         local base_size, result_size
+
         base_size, delta_offset = common.read_pack_varsize(delta_data, delta_offset)
         result_size, delta_offset = common.read_pack_varsize(delta_data, delta_offset)
 
-        assert(base_size == #base_object.data, 'delta base object size does not match expected size')
         local base_data = base_object.data
+        assert(base_size == #base_data, 'delta base object size does not match expected size')
 
         local parts = {}
         while delta_offset <= #delta_data do
@@ -361,11 +364,9 @@ function backend_onepack:_find_offset(oid)
     local stop = self.fanout[first_byte] + 1
 
     local i = binsearch(self.hashes, oid, start + 1, stop)
-    if i == stop then
-        return nil
+    if i then
+        return self.offsets[i]
     end
-
-    return self.offsets[i]
 end
 
 ---@param odb git.odb

@@ -4,7 +4,6 @@ local object = require('object')
 local packfile = require('packfile')
 local miniz = require('miniz')
 
----@class git.repository
 ---@field storage git.storage
 ---@field packs table<string, git.packfile>
 local repository = {}
