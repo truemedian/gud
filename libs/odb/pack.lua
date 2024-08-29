@@ -1,7 +1,7 @@
 local miniz = require('miniz')
 local fs = require('fs')
-local common = require('common')
 
+local common = require('../common.lua')
 local object = require('../object.lua')
 
 ---@class git.odb.backend.pack : git.odb.backend
@@ -10,8 +10,12 @@ local object = require('../object.lua')
 local backend_pack = {}
 local backend_pack_mt = {__index = backend_pack}
 
-local function pack_path(objects_dir, pack_hash) return objects_dir .. '/pack/pack-' .. pack_hash .. '.pack' end
-local function idx_path(objects_dir, pack_hash) return objects_dir .. '/pack/pack-' .. pack_hash .. '.idx' end
+local function pack_path(objects_dir, pack_hash)
+    return objects_dir .. '/pack/pack-' .. pack_hash .. '.pack'
+end
+local function idx_path(objects_dir, pack_hash)
+    return objects_dir .. '/pack/pack-' .. pack_hash .. '.idx'
+end
 
 ---@param objects_dir string
 function backend_pack.load(objects_dir)
@@ -20,21 +24,26 @@ end
 
 ---@param oid git.oid
 ---@return git.object|nil, string|nil
-function backend_pack:read(oid) end
+function backend_pack:read(oid)
+end
 
 ---@param oid git.oid
 ---@return git.object.kind|nil, number|string
-function backend_pack:read_header(oid) end
+function backend_pack:read_header(oid)
+end
 
 ---@param oid git.oid
 ---@return boolean, string|nil
-function backend_pack:exists(oid) end
+function backend_pack:exists(oid)
+end
 
 ---@param odb git.odb
 function backend_pack:refresh(odb)
     for entry in fs.scandirSync(self.objects_dir .. '/pack') do
         local pack_hash = entry.name:match('^pack%-(%x+)%.pack$')
-        if pack_hash then self:_load_index(odb, pack_hash) end
+        if pack_hash then
+            self:_load_index(odb, pack_hash)
+        end
     end
 end
 
@@ -47,17 +56,23 @@ function backend_pack:_load_index(odb, pack_hash)
     local packfile_path = pack_path(self.objects_dir, pack_hash)
 
     idx, err = fs.readFileSync(index_path)
-    if err then return nil, err end
+    if err then
+        return nil, err
+    end
 
     pack, err = fs.readFileSync(packfile_path)
-    if err then return nil, err end
+    if err then
+        return nil, err
+    end
 
     local index = {fanout = {}, hashes = {}, offsets = {}, lengths = {}}
 
     assert(idx:sub(1, 8) == '\xfftOc\x00\x00\x00\x02', 'invalid packfile index signature')
 
     local fanout_start = 9
-    for i = 0, 255 do index.fanout[i + 1] = common.read_u32be(idx, fanout_start + i * 4) end
+    for i = 0, 255 do
+        index.fanout[i + 1] = common.read_u32be(idx, fanout_start + i * 4)
+    end
 
     local hashes_start = fanout_start + 256 * 4
     for i = 0, index.fanout[256] - 1 do
@@ -97,7 +112,9 @@ function backend_pack:_load_index(odb, pack_hash)
     end
 
     local sorted_offsets = {}
-    for i = 1, index.fanout[256] do sorted_offsets[i] = index.offsets[i] end
+    for i = 1, index.fanout[256] do
+        sorted_offsets[i] = index.offsets[i]
+    end
     table.sort(sorted_offsets)
 
     for i = 1, index.fanout[256] do
@@ -106,13 +123,13 @@ function backend_pack:_load_index(odb, pack_hash)
         index.lengths[i] = stop - start
     end
 
-
 end
 
 ---@param oid git.oid
 ---@param data string
 ---@param kind git.object.kind
 ---@return boolean, string|nil
-function backend_pack:write(oid, data, kind) end
+function backend_pack:write(oid, data, kind)
+end
 
 return backend_pack

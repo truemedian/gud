@@ -10,7 +10,17 @@ local openssl = require('openssl')
 local oid_type = {}
 
 local hex_alphabet = {}
-for i = 0, 255 do hex_alphabet[i] = string.format('%02x', i) end
+for i = 0, 255 do
+    hex_alphabet[i] = string.format('%02x', i)
+end
+
+---@param algo? string
+---@return git.oid_type
+function oid_type.new(algo)
+    local self = setmetatable({}, {__index = oid_type})
+    self:set_algorithm(algo)
+    return self
+end
 
 ---@param binhash git.oid_binary
 ---@return git.oid
@@ -45,23 +55,25 @@ end
 ---@return git.oid
 function oid_type:digest(data, kind)
     if kind then
-        local digest = openssl.digest.new(oid_type.algorithm)
-        digest:update(kind .. #data .. '\x00')
+        local digest = openssl.digest.new(self.algorithm)
+        digest:update(kind .. ' ' .. #data .. '\x00')
         return digest:final(data)
     else
-        return openssl.digest.digest(oid_type.algorithm, data)
+        return openssl.digest.digest(self.algorithm, data)
     end
 end
 
 ---@param algorithm string?
 function oid_type:set_algorithm(algorithm)
-    if algorithm == nil then algorithm = 'sha1' end
+    if algorithm == nil then
+        algorithm = 'sha1'
+    end
 
     assert(pcall(openssl.digest.get, algorithm), 'invalid algorithm')
 
     self.algorithm = algorithm
     self.hex_length = #openssl.digest.digest(algorithm, '')
-    self.bin_length = self.bin_length / 2
+    self.bin_length = self.hex_length / 2
 end
 
 return oid_type

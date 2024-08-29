@@ -1,4 +1,7 @@
--- local bit = require('bit')
+local bit = require('bit')
+
+local fs = require('fs')
+
 local common = {}
 
 function common.read_u32be(data, offset)
@@ -48,15 +51,25 @@ function common.read_pack_varsize(data, offset)
     ]]
 
     local b1, b2, b3, b4, b5, b6, b7, b8 = data:byte(offset, offset + 7)
-    if b1 < 0x80 then return b1, offset + 1 end
+    if b1 < 0x80 then
+        return b1, offset + 1
+    end
 
-    if b2 < 0x80 then return -0x80 + b1 + b2 * 0x80, offset + 2 end
+    if b2 < 0x80 then
+        return -0x80 + b1 + b2 * 0x80, offset + 2
+    end
 
-    if b3 < 0x80 then return -0x4080 + b1 + b2 * 0x80 + b3 * 0x4000, offset + 3 end
+    if b3 < 0x80 then
+        return -0x4080 + b1 + b2 * 0x80 + b3 * 0x4000, offset + 3
+    end
 
-    if b4 < 0x80 then return -0x204080 + b1 + b2 * 0x80 + b3 * 0x4000 + b4 * 0x200000, offset + 4 end
+    if b4 < 0x80 then
+        return -0x204080 + b1 + b2 * 0x80 + b3 * 0x4000 + b4 * 0x200000, offset + 4
+    end
 
-    if b5 < 0x80 then return -0x10204080 + b1 + b2 * 0x80 + b3 * 0x4000 + b4 * 0x200000 + b5 * 0x10000000, offset + 5 end
+    if b5 < 0x80 then
+        return -0x10204080 + b1 + b2 * 0x80 + b3 * 0x4000 + b4 * 0x200000 + b5 * 0x10000000, offset + 5
+    end
 
     if b6 < 0x80 then
         return -0x810204080 + b1 + b2 * 0x80 + b3 * 0x4000 + b4 * 0x200000 + b5 * 0x10000000 + b6 * 0x800000000,
@@ -95,13 +108,21 @@ function common.read_pack_varoffset(data, offset)
     ]]
 
     local b1, b2, b3, b4, b5, b6, b7, b8 = data:byte(offset, offset + 7)
-    if b1 < 0x80 then return b1, offset + 1 end
+    if b1 < 0x80 then
+        return b1, offset + 1
+    end
 
-    if b2 < 0x80 then return -0x3f80 + b1 * 0x80 + b2, offset + 2 end
+    if b2 < 0x80 then
+        return -0x3f80 + b1 * 0x80 + b2, offset + 2
+    end
 
-    if b3 < 0x80 then return -0x1fbf80 + b1 * 0x4000 + b2 * 0x80 + b3, offset + 3 end
+    if b3 < 0x80 then
+        return -0x1fbf80 + b1 * 0x4000 + b2 * 0x80 + b3, offset + 3
+    end
 
-    if b4 < 0x80 then return -0xfdfbf80 + b1 * 0x200000 + b2 * 0x4000 + b3 * 0x80 + b4, offset + 4 end
+    if b4 < 0x80 then
+        return -0xfdfbf80 + b1 * 0x200000 + b2 * 0x4000 + b3 * 0x80 + b4, offset + 4
+    end
 
     if b5 < 0x80 then
         return -0x7efdfbf80 + b1 * 0x10000000 + b2 * 0x200000 + b3 * 0x4000 + b4 * 0x80 + b5, offset + 5
@@ -125,6 +146,58 @@ function common.read_pack_varoffset(data, offset)
     end
 
     error('variable length offset too large')
+end
+
+---@param path string
+---@return string
+function common.read_file(path)
+    local fd = assert(fs.openSync(path, 'r'))
+
+    local stat, stat_err = fs.fstatSync(fd)
+    if not stat then
+        fs.closeSync(fd)
+        error(stat_err)
+    end
+
+    if stat.size == 0 then
+        fs.closeSync(fd)
+        error('EINVAL: file is empty')
+    end
+
+    local first, read_err = fs.readSync(fd, stat.size)
+    if not first then
+        fs.closeSync(fd)
+        error(read_err)
+    end
+
+    if #first == stat.size then
+        fs.closeSync(fd)
+        return first
+    end
+
+    local buffer = {first}
+    while true do
+        local chunk
+        chunk, read_err = fs.readSync(fd, stat.size)
+        if not chunk then
+            fs.closeSync(fd)
+            error(read_err)
+        end
+
+        if #chunk == 0 then
+            break
+        end
+
+        buffer[#buffer + 1] = chunk
+    end
+
+    fs.closeSync(fd)
+    local data = table.concat(buffer)
+    if #data ~= stat.size then
+        error('EINVAL: file changed during read')
+    end
+
+    return data
 end
 
 return common
