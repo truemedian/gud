@@ -1,6 +1,7 @@
 local miniz = require('miniz')
 local fs = require('fs')
 
+local common = require('common')
 local object = require('object')
 
 ---@class git.odb.backend.loose : git.odb.backend
@@ -30,10 +31,7 @@ function backend_loose:read(odb, oid)
         return nil, 'object not found in database'
     end
 
-    local deflated, err = fs.readFileSync(path)
-    if err then
-        return nil, err
-    end
+    local deflated = common.read_file(path)
 
     local inflated = miniz.inflate(deflated, 1)
     local kind, size, after = inflated:match('^(%w+) (%d+)%z()')

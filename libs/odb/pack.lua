@@ -1,8 +1,4 @@
-local miniz = require('miniz')
 local fs = require('fs')
-
-local common = require('common')
-local object = require('object')
 
 local backend_onepack = require('odb/one_pack')
 
@@ -12,34 +8,13 @@ local backend_onepack = require('odb/one_pack')
 local backend_pack = {}
 local backend_pack_mt = {__index = backend_pack}
 
----@param objects_dir string
----@param pack_hash string
----@return string
-local function pack_path(objects_dir, pack_hash)
-    return objects_dir .. '/pack/pack-' .. pack_hash .. '.pack'
-end
-
----@param objects_dir string
----@param pack_hash string
----@return string
-local function idx_path(objects_dir, pack_hash)
-    return objects_dir .. '/pack/pack-' .. pack_hash .. '.idx'
-end
-
 ---@param odb git.odb
 ---@param objects_dir string
 ---@return git.odb.backend.pack|nil, nil|string
 function backend_pack.load(odb, objects_dir)
     local self = setmetatable({objects_dir = assert(objects_dir, 'missing objects directory')}, backend_pack_mt)
 
-    self.packs = {}
-    for name, kind in fs.scandirSync(objects_dir .. '/pack') do
-        local hash = name:match('^pack%-(%x+)%.pack$')
-        if hash and kind == 'file' then
-            self.packs[hash] = assert(backend_onepack.load(odb, objects_dir, hash))
-        end
-    end
-
+    self:refresh(odb)
     return self
 end
 
@@ -86,6 +61,13 @@ end
 
 ---@param odb git.odb
 function backend_pack:refresh(odb)
+    self.packs = {}
+    for name, kind in fs.scandirSync(self.objects_dir .. '/pack') do
+        local hash = name:match('^pack%-(%x+)%.pack$')
+        if hash and kind == 'file' then
+            self.packs[hash] = assert(backend_onepack.load(odb, self.objects_dir, hash))
+        end
+    end
 end
 
 ---@param oid git.oid

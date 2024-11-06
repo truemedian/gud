@@ -1,7 +1,5 @@
 local bit = require('bit')
-
 local fs = require('fs')
-local buffer = require('buffer')
 
 local common = {}
 
@@ -150,13 +148,11 @@ function common.read_pack_varoffset(data, offset)
 end
 
 ---@param path string
----@param as_buffer false|nil
----@return string|nil
----@overload fun(path: string, as_buffer: true): git.buffer|nil
-function common.read_file(path, as_buffer)
+---@return string
+function common.read_file(path)
     local fd = fs.openSync(path, 'r')
     if not fd then
-        return nil
+        error('ENOENT: ' .. path)
     end
 
     local stat, stat_err = fs.fstatSync(fd)
@@ -176,22 +172,17 @@ function common.read_file(path, as_buffer)
         error(read_err)
     end
 
-    local buf = buffer.new()
     if #first == stat.size then
         fs.closeSync(fd)
 
-        if as_buffer then
-            buf:add(first)
-            return buf
-        else
-            return first
-        end
+        return first
     end
 
-    buf:add(first)
+    local parts = {first}
+    local offset = #first
     while true do
         local chunk
-        chunk, read_err = fs.readSync(fd, stat.size, buf.size)
+        chunk, read_err = fs.readSync(fd, stat.size, offset)
         if not chunk then
             fs.closeSync(fd)
             error(read_err)
@@ -201,19 +192,16 @@ function common.read_file(path, as_buffer)
             break
         end
 
-        buf:add(chunk)
+        offset = offset + #chunk
+        table.insert(parts, chunk)
     end
 
     fs.closeSync(fd)
-    if buf.size ~= stat.size then
+    if offset ~= stat.size then
         error('EINVAL: file changed during read')
     end
 
-    if as_buffer then
-        return buf
-    end
-
-    return buf:sub(1)
+    return table.concat(parts)
 end
 
 return common

@@ -1,5 +1,4 @@
 local miniz = require('miniz')
-local fs = require('fs')
 
 local common = require('common')
 local object = require('object')
@@ -7,7 +6,7 @@ local object = require('object')
 ---@class git.odb.backend.one_pack : git.odb.backend
 ---@field objects_dir string
 ---@field pack_hash string
----@field packfile git.buffer
+---@field packfile string
 ---@field fanout integer[]
 ---@field hashes git.oid[]
 ---@field hashes_lookup table<integer, git.oid>
@@ -68,87 +67,8 @@ end
 function backend_onepack.load(odb, objects_dir, pack_hash)
     local self = setmetatable({objects_dir = assert(objects_dir, 'missing objects directory'), pack_hash = pack_hash},
                               backend_onepack_mt)
-    local idx, pack, err
 
-    local index_path = idx_path(self.objects_dir, self.pack_hash)
-    local packfile_path = pack_path(self.objects_dir, self.pack_hash)
-
-    idx, err = common.read_file(index_path, true)
-    if not idx then
-        return nil, err
-    end
-
-    assert(idx:sub(1, 8) == '\xfftOc\x00\x00\x00\x02', 'invalid packfile index signature')
-
-    pack, err = common.read_file(packfile_path, true)
-    if not pack then
-        return nil, err
-    end
-
-    self.packfile = pack
-
-    self.fanout = {}
-    self.hashes = {}
-    self.offsets = {}
-    self.lengths = {}
-    self.hashes_lookup = {}
-
-    local fanout_start = 9
-    for i = 0, 255 do
-        self.fanout[i + 1] = common.read_u32be(idx, fanout_start + i * 4)
-    end
-
-    local hashes_start = fanout_start + 256 * 4
-    for i = 0, self.fanout[256] - 1 do
-        local offset = hashes_start + i * 20
-
-        local binhash = idx:sub(offset, offset + 19) ---@cast binhash git.oid_binary
-        self.hashes[i + 1] = odb.oid_type:bin2hex(binhash)
-
-        assert(i == 0 or self.hashes[i + 1] > self.hashes[i], 'packfile index is not sorted')
-
-        local first_byte = binhash:byte() + 1
-        assert(i >= (self.fanout[first_byte - 1] or 0) and i < self.fanout[first_byte], 'packfile index is corrupt')
-    end
-
-    local long_offset_needed = {n = 0}
-
-    local checksums_start = hashes_start + self.fanout[256] * 20
-    local offsets_start = checksums_start + self.fanout[256] * 4
-    for i = 0, self.fanout[256] - 1 do
-        local offset = offsets_start + i * 4
-        self.offsets[i + 1] = common.read_u32be(idx, offset)
-
-        if self.offsets[i + 1] > 0x7fffffff then
-            local long_index = bit.band(self.offsets[i + 1], 0x7fffffff)
-            long_offset_needed[long_index] = i + 1
-            long_offset_needed.n = math.max(long_offset_needed.n, long_index)
-        end
-    end
-
-    local lengths_start = offsets_start + self.fanout[256] * 4
-    for i = 0, long_offset_needed.n - 1 do
-        local j = long_offset_needed[i]
-        assert(j, 'packfile index has extraneous long offset')
-
-        local offset = lengths_start + i * 8
-        self.offsets[j] = common.read_u64be(idx, offset)
-    end
-
-    local sorted_offsets = {}
-    for i = 1, self.fanout[256] do
-        sorted_offsets[i] = self.offsets[i]
-    end
-    table.sort(sorted_offsets)
-
-    for i = 1, self.fanout[256] do
-        local start = sorted_offsets[i]
-        local stop = sorted_offsets[i + 1] or pack.size
-        self.lengths[start] = stop - start
-
-        self.hashes_lookup[self.offsets[i]] = self.hashes[i]
-    end
-
+    self:refresh(odb)
     return self
 end
 
@@ -371,6 +291,78 @@ end
 
 ---@param odb git.odb
 function backend_onepack:refresh(odb)
+
+    local index_path = idx_path(self.objects_dir, self.pack_hash)
+    local packfile_path = pack_path(self.objects_dir, self.pack_hash)
+
+    local idx = common.read_file(index_path)
+    assert(idx:sub(1, 8) == '\xfftOc\x00\x00\x00\x02', 'invalid packfile index signature')
+
+    local pack = common.read_file(packfile_path)
+
+    self.packfile = pack
+
+    self.fanout = {}
+    self.hashes = {}
+    self.offsets = {}
+    self.lengths = {}
+    self.hashes_lookup = {}
+
+    local fanout_start = 9
+    for i = 0, 255 do
+        self.fanout[i + 1] = common.read_u32be(idx, fanout_start + i * 4)
+    end
+
+    local hashes_start = fanout_start + 256 * 4
+    for i = 0, self.fanout[256] - 1 do
+        local offset = hashes_start + i * 20
+
+        local binhash = idx:sub(offset, offset + 19) ---@cast binhash git.oid_binary
+        self.hashes[i + 1] = odb.oid_type:bin2hex(binhash)
+
+        assert(i == 0 or self.hashes[i + 1] > self.hashes[i], 'packfile index is not sorted')
+
+        local first_byte = binhash:byte() + 1
+        assert(i >= (self.fanout[first_byte - 1] or 0) and i < self.fanout[first_byte], 'packfile index is corrupt')
+    end
+
+    local long_offset_needed = {n = 0}
+
+    local checksums_start = hashes_start + self.fanout[256] * 20
+    local offsets_start = checksums_start + self.fanout[256] * 4
+    for i = 0, self.fanout[256] - 1 do
+        local offset = offsets_start + i * 4
+        self.offsets[i + 1] = common.read_u32be(idx, offset)
+
+        if self.offsets[i + 1] > 0x7fffffff then
+            local long_index = bit.band(self.offsets[i + 1], 0x7fffffff)
+            long_offset_needed[long_index] = i + 1
+            long_offset_needed.n = math.max(long_offset_needed.n, long_index)
+        end
+    end
+
+    local lengths_start = offsets_start + self.fanout[256] * 4
+    for i = 0, long_offset_needed.n - 1 do
+        local j = long_offset_needed[i]
+        assert(j, 'packfile index has extraneous long offset')
+
+        local offset = lengths_start + i * 8
+        self.offsets[j] = common.read_u64be(idx, offset)
+    end
+
+    local sorted_offsets = {}
+    for i = 1, self.fanout[256] do
+        sorted_offsets[i] = self.offsets[i]
+    end
+    table.sort(sorted_offsets)
+
+    for i = 1, self.fanout[256] do
+        local start = sorted_offsets[i]
+        local stop = sorted_offsets[i + 1] or #pack
+        self.lengths[start] = stop - start
+
+        self.hashes_lookup[self.offsets[i]] = self.hashes[i]
+    end
 end
 
 ---@param oid git.oid

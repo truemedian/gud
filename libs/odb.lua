@@ -5,7 +5,7 @@
 local odb = {}
 
 function odb.new(oid_type)
-    return setmetatable({oid_type = oid_type, backends = {}, cache = {}}, {__index = odb})
+    return setmetatable({oid_type = oid_type, backends = {}, cache = setmetatable({}, {__mode = "v"})}, {__index = odb})
 end
 
 --- Add a backend to the database.

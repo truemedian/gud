@@ -1,5 +1,7 @@
 local bit = require('bit')
 
+---@alias git.person { name: string, email: string, time: { seconds: number, offset: number } }
+
 local function decode_time(data)
     local seconds, offset_hr, offset_min = string.match(data, '(%d+) ([+-]%d%d)(%d%d)')
     assert(seconds, 'malformed time data')
@@ -10,11 +12,33 @@ local function decode_time(data)
     return {seconds = tonumber(seconds), offset = offset}
 end
 
+local function encode_time(data)
+    assert(type(data.seconds) == 'number', 'malformed time seconds')
+    assert(type(data.offset) == 'number', 'malformed time offset')
+    assert(data.offset >= -1440 and data.offset <= 1440, 'malformed time offset (must be between -1440 and 1440)')
+
+    local offset_hr = math.floor(data.offset / 60)
+    local offset_min = data.offset % 60
+
+    return string.format('%d %+03d%02d', data.seconds, offset_hr, offset_min)
+end
+
 local function decode_person(data)
-    local name, email, time = string.match(data, '([^<]+) <([^>]+)> (.+)')
+    local name, email, time = string.match(data, '([^<]*) <([^>]*)> (.+)')
     assert(name, 'malformed person data')
 
     return {name = name, email = email, time = decode_time(time)}
+end
+
+local function encode_person(data)
+    assert(type(data.name) == 'string' and #data.name > 0, 'malformed person name')
+    assert(type(data.email) == 'string' and #data.email > 0, 'malformed person email')
+    local time = encode_time(data.time)
+
+    local safe_name = data.name:gsub('[%c<>]', '')
+    local safe_email = data.email:gsub('[%c<>]', '')
+
+    return string.format('%s <%s> %s', safe_name, safe_email, time)
 end
 
 local function mode_is_tree(mode)
@@ -65,6 +89,85 @@ function object.create(odb, kind, data, oid)
     assert(odb.oid_type:digest(data, kind) == oid, 'object data does not match oid')
 
     return setmetatable({odb = odb, kind = kind, data = data, oid = oid}, object_mt)
+end
+
+---@param odb git.odb
+---@param data string
+---@return git.object
+function object.blob(odb, data)
+    local oid = odb.oid_type:digest(data, 'blob')
+    return object.create(odb, 'blob', data, oid)
+end
+
+---@param odb git.odb
+---@param files { name: string, mode: number, hash: string }[]
+---@return git.object
+function object.tree(odb, files)
+    local encoded = {}
+    for _, file in ipairs(files) do
+        assert(type(file.name) == 'string' and #file.name > 0, 'malformed tree name')
+        assert(type(file.mode) == 'number' and mode_to_name, 'malformed tree mode')
+        assert(type(file.hash) == 'string' and #file.hash == odb.oid_type.hex_length, 'malformed tree hash')
+
+        table.insert(encoded, string.format('%06o %s\0%s', file.mode, file.name, odb.oid_type:hex2bin(file.hash)))
+    end
+
+    local data = table.concat(encoded)
+    local oid = odb.oid_type:digest(data, 'tree')
+    return object.create(odb, 'tree', data, oid)
+end
+
+---@param odb git.odb
+---@param options { tree: git.object, parents: git.object[]|nil, message: string, author: git.person, committer: git.person, signature: string|nil }
+---@return git.object
+function object.commit(odb, options)
+    assert(getmetatable(options.tree) == object_mt, 'invalid commit tree')
+    assert(type(options.message) == 'string', 'malformed commit message')
+    assert(type(options.signature) == 'string' or not options.signature, 'malformed commit signature')
+
+    local author = encode_person(options.author)
+    local committer = encode_person(options.committer)
+
+    local encoded = {'tree ' .. options.tree.oid}
+    if options.parents then
+        for _, parent in ipairs(options.parents) do
+            assert(getmetatable(parent) == object_mt, 'invalid commit parent')
+            table.insert(encoded, 'parent ' .. parent.oid)
+        end
+    end
+
+    table.insert(encoded, 'author ' .. author)
+    table.insert(encoded, 'committer ' .. committer)
+
+    if options.signature then
+        local indented = options.signature:gsub('\n', '\n ')
+        table.insert(encoded, 'gpgsig ' .. indented)
+    end
+
+    table.insert(encoded, '')
+    table.insert(encoded, options.message)
+    local data = table.concat(encoded, '\n')
+
+    local oid = odb.oid_type:digest(data, 'commit')
+    return object.create(odb, 'commit', data, oid)
+end
+
+---@param odb git.odb
+---@param options { object: git.object, tag: string, message: string, tagger: git.person }
+---@return git.object
+function object.tag(odb, options)
+    assert(getmetatable(options.object) == object_mt, 'invalid tag object')
+    assert(type(options.tag) == 'string' and #options.tag > 0, 'malformed tag field')
+    assert(type(options.message) == 'string', 'malformed tag message')
+    local tagger = encode_person(options.tagger)
+    local safe_tag = options.tag:gsub('%c', '')
+    local typ = options.object.kind
+
+    local encoded = string.format('object %s\ntype %s\ntag %s\ntagger %s\n\n%s', options.object.oid, typ, safe_tag,
+                                  tagger, options.message)
+
+    local oid = odb.oid_type:digest(encoded, 'tag')
+    return object.create(odb, 'tag', encoded, oid)
 end
 
 function object:parse()
@@ -132,6 +235,8 @@ function object:parse_commit()
         elseif name == 'HG:rename-source' then
             -- ignore
         elseif name == 'mergetag' then
+            -- ignore
+        elseif name == 'encoding' then
             -- ignore
         else
             error('unknown commit field: ' .. name)
