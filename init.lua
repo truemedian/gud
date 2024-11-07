@@ -1,10 +1,10 @@
-local odb = require('odb')
-local oid = require('oid')
+local odb = require('git/odb')
+local oid = require('git/oid')
 
-local backend_loose = require('odb/loose')
-local backend_pack = require('odb/pack')
+local backend_loose = require('git/odb/loose')
+local backend_pack = require('git/odb/pack')
 
-local backendref_files = require('refdb/files')
+local backendref_files = require('git/refdb/files')
 
 local my_oid = oid.new('sha1')
 local my_odb = odb.new(my_oid)
