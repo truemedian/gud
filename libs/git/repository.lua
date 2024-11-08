@@ -1,6 +1,6 @@
 ---@class git.repository
 ---@field odb git.odb
----@field
+---@
 local repository = {}
 
 --- Return an object from the repository.
@@ -19,4 +19,7 @@ end
 
 --- Resolve a reference to an object.
 ---@param ref string
-function repository:resolve(ref) end
+function repository:resolve(ref)
+
+
+end

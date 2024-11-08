@@ -7,10 +7,10 @@ local openssh = require('sshkey/openssh')
 ---@param passphrase string|nil
 ---@return sshkey.key|nil, string|nil
 local function decode_private_key(data, passphrase)
-	if data:sub(1, 35) == '-----BEGIN OPENSSH PRIVATE KEY-----' then
-		local last = data:find('-----END OPENSSH PRIVATE KEY-----', 36, true)
-		local encoded = data:sub(36, last - 1)
-		local decoded = openssl.openssl.base64(encoded, false, false)
+	if data:sub(1, 36) == '-----BEGIN OPENSSH PRIVATE KEY-----\n' then
+		local last = data:find('\n-----END OPENSSH PRIVATE KEY-----', 37, true)
+		local encoded = data:sub(37, last - 1)
+		local decoded = openssl.base64(encoded, false, false)
 
 		return openssh.decode_openssh_private_key(decoded, passphrase)
 	else
@@ -18,6 +18,7 @@ local function decode_private_key(data, passphrase)
 	end
 end
 
+---Decode a SSH or PKCS public key from the given data.
 ---@param data string
 ---@return sshkey.key|nil, string|nil
 local function decode_public_key(data)
@@ -39,14 +40,14 @@ local function create_signature(key, data, namespace)
 
 	local signed, err = key.impl.sign_raw(key, blob, 'sha512')
 	if not signed then
-		return nil, err
+		return nil, 'signature failed: ' .. err
 	end
 
 	local pubkey = key.impl.serialize_public(key)
 	local signature = string.pack('>c6I4s4s4s4s4s4', 'SSHSIG', 1, pubkey, namespace, '', 'sha512', signed)
 
-	local encoded = openssl.openssl.base64(signature, true, true)
-	return '-----BEGIN SSH SIGNATURE-----' .. encoded .. '-----END SSH SIGNATURE-----'
+	local encoded = openssl.base64(signature, true, false)
+	return '-----BEGIN SSH SIGNATURE-----\n' .. encoded .. '-----END SSH SIGNATURE-----'
 end
 
 ---Verify a SSH signature with the given key, original data, and namespace.
@@ -56,11 +57,11 @@ end
 ---@param namespace string
 ---@return boolean, string|nil
 local function verify_signature(key, encoded_signature, data, namespace)
-	local _, encoded_start = encoded_signature:find('-----BEGIN SSH SIGNATURE-----', 1, true)
-	local encoded_end = encoded_signature:find('-----END SSH SIGNATURE-----', encoded_start, true)
+	local _, encoded_start = encoded_signature:find('-----BEGIN SSH SIGNATURE-----\n', 1, true)
+	local encoded_end = encoded_signature:find('\n-----END SSH SIGNATURE-----', encoded_start, true)
 	local encoded = encoded_signature:sub(encoded_start + 1, encoded_end - 1)
 
-	local signature = openssl.openssl.base64(encoded, false, true)
+	local signature = openssl.base64(encoded, false, false)
 
 	local magic, version, pubkey, ns, reserved, algo, signed = string.unpack('>c6I4s4s4s4s4s4', signature)
 	if magic ~= 'SSHSIG' or version > 1 then -- malformed
@@ -78,15 +79,21 @@ local function verify_signature(key, encoded_signature, data, namespace)
 	local hashed = openssl.digest.digest(algo, data, true)
 	local blob = string.pack('>c6s4s4s4s4', 'SSHSIG', namespace, reserved, algo, hashed)
 
-	return key.impl.verify_raw(key, signed, blob, algo)
+	local verified, err = key.impl.verify_raw(key, signed, blob)
+	if not verified then
+		return false, 'verification failed: ' .. err
+	end
+
+	return true
 end
 
+---Generate a fingerprint for the given key.
 ---@param key sshkey.key
 ---@return string
 local function fingerprint(key)
 	local public = key.impl.serialize_public(key)
 	local hashed = openssl.digest.digest('sha256', public, true)
-	local encoded = openssl.openssl.base64(hashed, true, true)
+	local encoded = openssl.base64(hashed, true, true)
 
 	return 'SHA256:' .. encoded
 end

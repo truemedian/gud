@@ -6,18 +6,18 @@ local function complete_crt_parameters(d, p, q)
 	return dmp1, dmq1
 end
 
----@param key sshkey.key
+---@param key sshkey.key.rsa
 ---@return string
 local function serialize_public(key)
 	local info = assert(key.pk:parse().rsa):parse()
 	local e = info.e:totext()
 	local n = info.n:totext()
 
-	return string.pack('>s4s4s4', 'ssh-rsa', e, '\x00' .. n)
+	return string.pack('>s4s4s4', 'ssh-rsa', e, n)
 end
 
----@param key sshkey.key
----@param buf sshkey.buf
+---@param key sshkey.key.rsa
+---@param buf sshkey.buffer
 ---@return boolean|nil, string|nil
 local function deserialize_public(key, buf)
 	local e = buf:read_string()
@@ -28,15 +28,15 @@ local function deserialize_public(key, buf)
 
 	local pk, err = openssl.pkey.new({ alg = 'rsa', n = n, e = e })
 	if not pk then
-		return nil, 'parse public key failed: ' .. err
+		return nil, 'rsa.deserialize_public: ' .. err
 	end
 
 	key.pk = pk
 	return true
 end
 
----@param key sshkey.key
----@param buf sshkey.buf
+---@param key sshkey.key.rsa
+---@param buf sshkey.buffer
 ---@return boolean|nil, string|nil
 local function deserialize_private(key, buf)
 	local n = buf:read_string()
@@ -46,7 +46,7 @@ local function deserialize_private(key, buf)
 	local p = buf:read_string()
 	local q = buf:read_string()
 	if #n == 0 or #e == 0 or #d == 0 or #iqmp == 0 or #p == 0 or #q == 0 then
-		return nil, 'invalid rsa private key'
+		return nil, 'rsa.deserialize_private: invalid parameters'
 	end
 
 	n = openssl.bn.text(n)
@@ -69,51 +69,45 @@ local function deserialize_private(key, buf)
 		dmq1 = dmq1,
 	})
 	if not sk then
-		return nil, 'parse private key failed: ' .. err
+		return nil, 'rsa.deserialize_private: ' .. err
 	end
 
 	key.sk = sk
 	return true
 end
 
----@param key sshkey.key
+---@param key sshkey.key.rsa
 ---@param data string
----@param algo string
 ---@return string|nil, string|nil
-local function sign_raw(key, data, algo)
-	local digest = openssl.digest.signInit(algo, key.sk)
-	local signed = digest:sign(data)
-
-	if algo == 'sha256' then
-		algo = '256'
-	elseif algo == 'sha512' then
-		algo = '512'
-	else
-		return nil, 'unsupported algorithm'
+local function sign_raw(key, data)
+	local digest = openssl.digest.signInit('sha512', key.sk)
+	if not digest then
+		return nil, 'rsa.sign: allocation failed'
 	end
 
-	return string.pack('>s4s4', 'rsa-sha2-' .. algo, signed)
+	local signed = digest:sign(data)
+	return string.pack('>s4s4', 'rsa-sha2-sha512', signed)
 end
 
----@param key sshkey.key
+---@param key sshkey.key.rsa
 ---@param signature string
 ---@param data string
----@param algo string
 ---@return boolean, string|nil
-local function verify_raw(key, signature, data, algo)
-	local digest = openssl.digest.verifyInit(algo, key.pk)
+local function verify_raw(key, signature, data)
 	local format, raw_signature = string.unpack('>s4s4', signature)
+	local hash_algo
 
-	if algo == 'sha256' then
-		algo = '256'
-	elseif algo == 'sha512' then
-		algo = '512'
+	if format == 'rsa-sha2-sha512' then
+		hash_algo = 'sha512'
+	elseif format == 'rsa-sha2-sha256' then
+		hash_algo = 'sha256'
 	else
-		return false
+		return false, 'rsa.verify: invalid signature format'
 	end
 
-	if format ~= 'rsa-sha2-' .. algo then
-		return false
+	local digest = openssl.digest.verifyInit(hash_algo, key.pk)
+	if not digest then
+		return false, 'rsa.verify: allocation failed'
 	end
 
 	return digest:verify(raw_signature, data)

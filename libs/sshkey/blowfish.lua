@@ -1,3 +1,5 @@
+local bit = require('bit')
+
 local function init_state()
 	return {
 		sboxes = {

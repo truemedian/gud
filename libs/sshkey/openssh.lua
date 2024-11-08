@@ -1,7 +1,7 @@
 local openssl = require('openssl')
 
 local bcrypt = require('sshkey/bcrypt')
-local sshbuf = require('sshkey/sshbuf')
+local buffer = require('sshkey/buffer')
 
 local ciphername_translation = {
 	['3des-ctr'] = 'des-ede3-cbc',
@@ -15,7 +15,13 @@ local ciphername_translation = {
 	['aes256-gcm@openssh.com'] = 'aes-256-gcm',
 }
 
-local impls = { require('sshkey/impl/ed25519').ed25519, require('sshkey/impl/rsa').rsa }
+local impls = {
+	require('sshkey/impl/ed25519').ed25519,
+	require('sshkey/impl/rsa').rsa,
+	require('sshkey/impl/ecdsa').ecdsa_nistp256,
+	require('sshkey/impl/ecdsa').ecdsa_nistp384,
+	require('sshkey/impl/ecdsa').ecdsa_nistp521,
+}
 
 local function get_keytype_impl(kt)
 	for _, impl in ipairs(impls) do
@@ -51,7 +57,7 @@ local function decrypt_section(ciphername, kdfname, kdfoptions, data, passphrase
 	end
 
 	-- parse necessary kdf options
-	local kdf_buf = sshbuf(kdfoptions)
+	local kdf_buf = buffer(kdfoptions)
 	if kdfname == 'bcrypt' then
 		local salt = kdf_buf:read_string()
 		local rounds = kdf_buf:read_u32()
@@ -73,7 +79,7 @@ end
 ---@param passphrase string|nil
 ---@return sshkey.key|nil, string|nil
 local function decode_openssh_private_key(data, passphrase)
-	local buf = sshbuf(data)
+	local buf = buffer(data)
 	if buf:read_bytes(15) ~= 'openssh-key-v1\x00' then
 		return nil, 'invalid openssh private key: bad magic'
 	end
@@ -97,7 +103,7 @@ local function decode_openssh_private_key(data, passphrase)
 
 	local key = {}
 	-- parse public key first before even attempting to decrypt private key
-	local pubkey_buf = sshbuf(public_key_data)
+	local pubkey_buf = buffer(public_key_data)
 	key.kt = pubkey_buf:read_string()
 	key.impl = get_keytype_impl(key.kt)
 	if not key.impl then
@@ -118,7 +124,7 @@ local function decode_openssh_private_key(data, passphrase)
 	end
 
 	-- ensure the decrypted private key is valid
-	local private_key_buf = sshbuf(private_key_encrypted)
+	local private_key_buf = buffer(private_key_encrypted)
 	local check1 = private_key_buf:read_u32()
 	local check2 = private_key_buf:read_u32()
 	if check1 ~= check2 then
@@ -206,9 +212,9 @@ end
 ---@return sshkey.key|nil, string|nil
 local function decode_openssh_public_key(data)
 	local prefix, encoded, comment = data:match('^(%S+) (%S+)%s*(.*)$')
-	local decoded = openssl.openssl.base64(encoded, false, true)
+	local decoded = openssl.base64(encoded, false, true)
 
-	local buf = sshbuf(decoded)
+	local buf = buffer(decoded)
 	local kt = buf:read_string()
 	if kt ~= prefix then
 		return nil, 'invalid openssh public key: key type mismatch'
