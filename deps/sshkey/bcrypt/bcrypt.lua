@@ -1,8 +1,8 @@
 local openssl = require('openssl')
 
+local bit = require('sshkey/bcrypt/bit-compat')
 local blowfish = require('sshkey/bcrypt/blowfish')
 local buffer = require('sshkey/format/buffer')
-local bit = require('sshkey/bcrypt/bit-compat')
 
 local bxor, band, rshift = bit.bxor, bit.band, bit.rshift
 

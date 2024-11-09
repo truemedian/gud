@@ -79,5 +79,5 @@ end
 
 return {
 	read = new_read_buffer,
-	write = new_write_buffer
+	write = new_write_buffer,
 }
