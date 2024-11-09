@@ -1,23 +1,15 @@
-local bit = require('bit')
 local openssl = require('openssl')
 
 local blowfish = require('sshkey/bcrypt/blowfish')
 local buffer = require('sshkey/format/buffer')
+local bit = require('sshkey/bcrypt/bit-compat')
 
-local function xor_string(a, b)
-	assert(#a == #b, 'length mismatch')
+local bxor, band, rshift = bit.bxor, bit.band, bit.rshift
 
-	-- local result = {}
-	-- for i = 1, #a do
-	-- 	result[i] = string.char(bit.bxor(a:byte(i), b:byte(i)))
-	-- end
-	-- return table.concat(result)
-
-	for i = 1, #a do
-		a[i] = bit.bxor(a[i], b[i])
-	end
-end
-
+---Adapted from <https://github.com/openssh/openssh-portable/blob/master/openbsd-compat/bcrypt_pbkdf.c#L73>
+---@param cdata number[]
+---@param sha2pass string
+---@param sha2salt string
 local function bcrypt_hash(cdata, sha2pass, sha2salt)
 	cdata[1] = 0x4f787963
 	cdata[2] = 0x68726f6d
@@ -43,14 +35,17 @@ local function bcrypt_hash(cdata, sha2pass, sha2salt)
 end
 
 local function write_u32le(out, i, n)
-	local a = bit.band(n, 0xff)
-	local b = bit.band(bit.rshift(n, 8), 0xff)
-	local c = bit.band(bit.rshift(n, 16), 0xff)
-	local d = bit.band(bit.rshift(n, 24), 0xff)
+	local a = band(n, 0xff)
+	local b = band(rshift(n, 8), 0xff)
+	local c = band(rshift(n, 16), 0xff)
+	local d = band(rshift(n, 24), 0xff)
 
 	out[i] = string.char(a, b, c, d)
 end
 
+---Collapse the u32 cdata array as little-endian into a string
+---@param cdata number[]
+---@return string
 local function collapse_little(cdata)
 	local out = {}
 
@@ -66,6 +61,11 @@ local function collapse_little(cdata)
 	return table.concat(out)
 end
 
+---bcrypt_hash-based PBKDF function based off of PKCS#5 PKKDF2, this is the key derivation function used by OpenSSH
+---to derive the decryption key used for encrypting private keys. The implementation deviates from the PKCS#5 standard
+---to shuffle the resulting output bytes to prevent an attacker from doing less work to obtain the same key.
+---
+---Adapted from <https://github.com/openssh/openssh-portable/blob/master/openbsd-compat/bcrypt_pbkdf.c#L114>
 local function bcrypt_pbkdf(password, salt, keylen, rounds)
 	assert(rounds > 0, 'invalid bcrypt parameter')
 	assert(#salt <= 2 ^ 20, 'invalid bcrypt parameter')
@@ -100,7 +100,9 @@ local function bcrypt_pbkdf(password, salt, keylen, rounds)
 			-- subsequent rounds, salt is the previous output
 			sha2salt = openssl.digest.digest('sha512', collapse_little(tmpout), true)
 			bcrypt_hash(tmpout, sha2pass, sha2salt)
-			xor_string(out, tmpout)
+			for j = 1, 8 do
+				out[j] = bxor(out[j], tmpout[j])
+			end
 		end
 
 		amt = math.min(amt, keylen)
@@ -114,7 +116,7 @@ local function bcrypt_pbkdf(password, salt, keylen, rounds)
 
 			local offset = math.floor(i / 4)
 			local shift = (i % 4) * 8
-			local byte = bit.band(bit.rshift(out[offset + 1], shift), 0xff)
+			local byte = band(rshift(out[offset + 1], shift), 0xff)
 
 			key[dest] = string.char(byte)
 		end

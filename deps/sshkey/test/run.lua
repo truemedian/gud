@@ -6,12 +6,12 @@ local function try_key(name)
 	local data_public = fs.readFileSync('keys/' .. name .. '.pub')
 	local data_signature = fs.readFileSync('keys/' .. name .. '.pub.sig')
 
-	local pk, pk_e = sshkey.decode_public_key(data_public)
+	local pk, pk_e = sshkey.load_public(data_public)
 	if not pk then
 		return false, 'decode public key', pk_e
 	end
 
-	local sk, sk_e = sshkey.decode_private_key(data_private, 'password')
+	local sk, sk_e = sshkey.load_private(data_private, 'password')
 	if not sk then
 		return false, 'decode private key', sk_e
 	end
@@ -21,17 +21,17 @@ local function try_key(name)
 		return false, 'ensure correct public key derivation', 'fingerprint mismatch'
 	end
 
-	local sig, sig_e = sshkey.create_signature(sk, data_public, 'something')
+	local sig, sig_e = sshkey.sign(sk, data_public, 'something')
 	if not sig then
 		return false, 'create signature', sig_e
 	end
 
-	local v1, v1_e = sshkey.verify_signature(pk, sig, data_public, 'something')
+	local v1, v1_e = sshkey.verify(pk, sig, data_public, 'something')
 	if not v1 then
 		return false, 'validate created sigature', v1_e
 	end
 
-	local v2, v2_e = sshkey.verify_signature(pk, data_signature, data_public, 'something')
+	local v2, v2_e = sshkey.verify(pk, data_signature, data_public, 'something')
 	if not v2 then
 		return false, 'validate existing signature', v2_e
 	end

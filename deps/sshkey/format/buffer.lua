@@ -1,4 +1,6 @@
-local bit = require('bit')
+local bit = require('sshkey/bcrypt/bit-compat')
+
+local band, rshift = bit.band, bit.rshift
 
 ---@class sshkey.read_buffer
 ---@field str string
@@ -47,10 +49,10 @@ write_buffer.__index = write_buffer
 
 ---@param n integer
 function write_buffer:write_u32(n)
-	local a = bit.band(bit.rshift(n, 24), 0xff)
-	local b = bit.band(bit.rshift(n, 16), 0xff)
-	local c = bit.band(bit.rshift(n, 8), 0xff)
-	local d = bit.band(n, 0xff)
+	local a = band(rshift(n, 24), 0xff)
+	local b = band(rshift(n, 16), 0xff)
+	local c = band(rshift(n, 8), 0xff)
+	local d = band(n, 0xff)
 
 	table.insert(self.parts, string.char(a, b, c, d))
 end

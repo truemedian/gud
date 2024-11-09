@@ -7,27 +7,40 @@ local openssh = require('sshkey/format/openssh')
 ---@param data string
 ---@param passphrase string|nil
 ---@return sshkey.key|nil, string|nil
-local function decode_private_key(data, passphrase)
+local function load_private(data, passphrase)
 	if data:sub(1, 36) == '-----BEGIN OPENSSH PRIVATE KEY-----\n' then
 		local last = data:find('\n-----END OPENSSH PRIVATE KEY-----', 37, true)
 		local encoded = data:sub(37, last - 1)
 		local decoded = openssl.base64(encoded, false, false)
 
-		return openssh.decode_openssh_private_key(decoded, passphrase)
+		return openssh.load_private_openssh(decoded, passphrase)
 	else
-		return openssh.decode_pkcs_private_key(data, passphrase)
+		return openssh.load_private_other(data, passphrase)
 	end
 end
 
 ---Decode a SSH or PKCS public key from the given data.
 ---@param data string
 ---@return sshkey.key|nil, string|nil
-local function decode_public_key(data)
+local function load_public(data)
 	if data:sub(1, 4) == 'ssh-' or data:sub(1, 6) == 'ecdsa-' then
-		return openssh.decode_openssh_public_key(data)
+		return openssh.load_public_openssh(data)
 	else
-		return openssh.decode_pkcs_public_key(data)
+		return openssh.load_public_other(data)
 	end
+end
+
+---Generate a fingerprint for the given key.
+---@param key sshkey.key
+---@return string
+local function fingerprint(key)
+	assert(key.kt and key.pk, 'fingerprint: not a sshkey')
+
+	local public = key.impl.serialize_public(key)
+	local hashed = openssl.digest.digest('sha256', public, true)
+	local encoded = openssl.base64(hashed, true, true)
+
+	return 'SHA256:' .. encoded
 end
 
 ---Sign a piece of data with the given key and namespace.
@@ -35,7 +48,12 @@ end
 ---@param data string
 ---@param namespace string
 ---@return string|nil, string|nil
-local function create_signature(key, data, namespace)
+local function sign(key, data, namespace)
+	assert(key.kt and key.pk, 'fingerprint: not a sshkey')
+	if not key.sk then
+		return nil, 'sign: missing private key'
+	end
+
 	local hashed = openssl.digest.digest('sha512', data, true)
 	local blob = buffer.write()
 	blob:write_bytes('SSHSIG')
@@ -46,7 +64,7 @@ local function create_signature(key, data, namespace)
 
 	local signed, err = key.impl.sign_raw(key, blob:encode())
 	if not signed then
-		return nil, 'signature failed: ' .. err
+		return nil, err
 	end
 
 	local pubkey = key.impl.serialize_public(key)
@@ -69,7 +87,9 @@ end
 ---@param data string
 ---@param expected_namespace string
 ---@return boolean, string|nil
-local function verify_signature(key, encoded_signature, data, expected_namespace)
+local function verify(key, encoded_signature, data, expected_namespace)
+	assert(key.kt and key.pk, 'fingerprint: not a sshkey')
+
 	local _, encoded_start = encoded_signature:find('-----BEGIN SSH SIGNATURE-----\n', 1, true)
 	local encoded_end = encoded_signature:find('\n-----END SSH SIGNATURE-----', encoded_start, true)
 	local encoded = encoded_signature:sub(encoded_start + 1, encoded_end - 1)
@@ -78,11 +98,11 @@ local function verify_signature(key, encoded_signature, data, expected_namespace
 
 	local magic = signature:read_bytes(6)
 	local version = signature:read_u32()
-	if magic ~= 'SSHSIG' or version > 1 then -- malformed
+	if magic ~= 'SSHSIG' or version ~= 1 then -- malformed
 		return false, 'verify: malformed signature'
 	end
 
-	local pubkey = signature:read_string()
+	local their_pubkey = signature:read_string()
 	local namespace = signature:read_string()
 	local reserved = signature:read_string()
 	local hash_algo = signature:read_string()
@@ -91,19 +111,26 @@ local function verify_signature(key, encoded_signature, data, expected_namespace
 		return false, 'verify: malformed signature'
 	end
 
-	local pubkey_buf = buffer.read(pubkey)
+	local pubkey_buf = buffer.read(their_pubkey)
 	local key_type = pubkey_buf:read_string()
 	if key_type ~= key.kt then -- wrong key type
 		return false, 'verify: mismatched public key type'
 	end
 
-	local stored_key = {}
-	stored_key.kt = key_type
-	stored_key.impl = key.impl
-	stored_key.impl.deserialize_public(stored_key, pubkey_buf)
+	local our_serialized = key.impl.serialize_public(key)
+	if their_pubkey ~= our_serialized then
+		-- some public keys can be stored in ever so slightly different form (primary rsa bignums may be front-padded with 0x00)
+		-- so we need to deserialize the stored key and compare it to the one we have
+		local stored_key = {}
+		stored_key.kt = key_type
+		key.impl.deserialize_public(stored_key, pubkey_buf)
+		local their_serialized = key.impl.serialize_public(stored_key)
 
-	if key.impl.serialize_public(key) ~= stored_key.impl.serialize_public(key) then -- wrong key
-		return false, 'verify: mismatched public key'
+		if their_serialized ~= our_serialized then -- wrong key
+			return false, 'verify: mismatched public key'
+		end
+
+		-- if the keys are the same after deserialization we can continue
 	end
 
 	if expected_namespace == nil then
@@ -130,21 +157,10 @@ local function verify_signature(key, encoded_signature, data, expected_namespace
 	return true
 end
 
----Generate a fingerprint for the given key.
----@param key sshkey.key
----@return string
-local function fingerprint(key)
-	local public = key.impl.serialize_public(key)
-	local hashed = openssl.digest.digest('sha256', public, true)
-	local encoded = openssl.base64(hashed, true, true)
-
-	return 'SHA256:' .. encoded
-end
-
 return {
-	decode_private_key = decode_private_key,
-	decode_public_key = decode_public_key,
-	create_signature = create_signature,
-	verify_signature = verify_signature,
+	load_private = load_private,
+	load_public = load_public,
 	fingerprint = fingerprint,
+	verify = verify,
+	sign = sign,
 }

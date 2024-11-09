@@ -187,7 +187,7 @@ function object.tag(odb, options)
 	)
 
 	if options.signing_key then
-		local signature, err = sshkey.create_signature(options.signing_key, encoded, 'git-tag')
+		local signature, err = sshkey.sign(options.signing_key, encoded, 'git-tag')
 		if not signature then
 			error('failed to sign tag: ' .. err)
 		end

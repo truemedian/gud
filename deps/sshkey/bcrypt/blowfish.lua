@@ -1,6 +1,5 @@
-local bit = require('bit')
-
-local bxor, band, rshift = bit.bxor, bit.band, bit.rshift
+local bit = require('sshkey/bcrypt/bit-compat')
+local bxor, bxor3, band, rshift = bit.bxor, bit.bxor3, bit.band, bit.rshift
 
 local function init_state()
 	return {
@@ -1095,7 +1094,7 @@ local function encipher(state, l, r)
 			local x = sbox1[b + 1]
 			local y = sbox2[c + 1]
 			local z = sbox3[d + 1]
-			r = bxor(r, bxor(w + x, y) + z, subkeys[i])
+			r = bxor3(r, bxor(w + x, y) + z, subkeys[i])
 		end
 
 		do
@@ -1108,7 +1107,7 @@ local function encipher(state, l, r)
 			local x = sbox1[b + 1]
 			local y = sbox2[c + 1]
 			local z = sbox3[d + 1]
-			l = bxor(l, bxor(w + x, y) + z, subkeys[i + 1])
+			l = bxor3(l, bxor(w + x, y) + z, subkeys[i + 1])
 		end
 	end
 	return bxor(r, subkeys[18]), l

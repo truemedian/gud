@@ -103,7 +103,7 @@ local function verify_raw(key, signature, data)
 	local signature_decoder = buffer.read(signature)
 	local format = signature_decoder:read_string()
 	if format ~= key.kt then
-		return false
+		return false, 'ed25519.verify: signature format mismatch'
 	end
 
 	local digest = openssl.digest.verifyInit(nil, key.pk)
