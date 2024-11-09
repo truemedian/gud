@@ -1,5 +1,7 @@
 local openssl = require('openssl')
 
+local buffer = require('sshkey/format/buffer')
+
 local function complete_crt_parameters(d, p, q)
 	local dmp1 = d % (p - 1)
 	local dmq1 = d % (q - 1)
@@ -13,11 +15,15 @@ local function serialize_public(key)
 	local e = info.e:totext()
 	local n = info.n:totext()
 
-	return string.pack('>s4s4s4', 'ssh-rsa', e, n)
+	local encoder = buffer.write()
+	encoder:write_string(key.kt)
+	encoder:write_string(e)
+	encoder:write_string(n)
+	return encoder:encode()
 end
 
 ---@param key sshkey.key.rsa
----@param buf sshkey.buffer
+---@param buf sshkey.read_buffer
 ---@return boolean|nil, string|nil
 local function deserialize_public(key, buf)
 	local e = buf:read_string()
@@ -36,7 +42,7 @@ local function deserialize_public(key, buf)
 end
 
 ---@param key sshkey.key.rsa
----@param buf sshkey.buffer
+---@param buf sshkey.read_buffer
 ---@return boolean|nil, string|nil
 local function deserialize_private(key, buf)
 	local n = buf:read_string()
@@ -86,7 +92,14 @@ local function sign_raw(key, data)
 	end
 
 	local signed = digest:sign(data)
-	return string.pack('>s4s4', 'rsa-sha2-sha512', signed)
+	if not signed then
+		return nil, 'rsa.sign: signing failed'
+	end
+
+	local encoder = buffer.write()
+	encoder:write_string('rsa-sha2-512')
+	encoder:write_string(signed)
+	return encoder:encode()
 end
 
 ---@param key sshkey.key.rsa
@@ -94,12 +107,13 @@ end
 ---@param data string
 ---@return boolean, string|nil
 local function verify_raw(key, signature, data)
-	local format, raw_signature = string.unpack('>s4s4', signature)
-	local hash_algo
+	local signature_decoder = buffer.read(signature)
+	local format = signature_decoder:read_string()
 
-	if format == 'rsa-sha2-sha512' then
+	local hash_algo
+	if format == 'rsa-sha2-512' then
 		hash_algo = 'sha512'
-	elseif format == 'rsa-sha2-sha256' then
+	elseif format == 'rsa-sha2-256' then
 		hash_algo = 'sha256'
 	else
 		return false, 'rsa.verify: invalid signature format'
@@ -110,7 +124,16 @@ local function verify_raw(key, signature, data)
 		return false, 'rsa.verify: allocation failed'
 	end
 
-	return digest:verify(raw_signature, data)
+	local verified, err = digest:verify(signature_decoder:read_string(), data)
+	if not verified then
+		if err then
+			return false, 'rsa.verify: ' .. err
+		else
+			return false, 'rsa.verify: verification failed for unknown reason'
+		end
+	end
+
+	return true
 end
 
 local rsa_impl = {

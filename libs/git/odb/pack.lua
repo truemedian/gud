@@ -1,6 +1,6 @@
 local fs = require('fs')
 
-local backend_onepack = require('odb/one_pack')
+local backend_onepack = require('git/odb/one_pack')
 
 ---@class git.odb.backend.pack : git.odb.backend
 ---@field objects_dir string

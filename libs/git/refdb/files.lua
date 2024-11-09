@@ -1,6 +1,6 @@
 local fs = require('fs')
 
-local common = require('common')
+local common = require('git/common')
 
 ---@class git.refdb.files
 ---@field repository_dir string

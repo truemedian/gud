@@ -106,10 +106,24 @@ end
 ---@return git.object
 function object.tree(odb, files)
 	local encoded = {}
+
+	local check_duplicate = {}
 	for _, file in ipairs(files) do
-		assert(type(file.name) == 'string' and #file.name > 0, 'malformed tree name')
-		assert(type(file.mode) == 'number' and mode_to_name, 'malformed tree mode')
-		assert(type(file.hash) == 'string' and #file.hash == odb.oid_type.hex_length, 'malformed tree hash')
+		assert(type(file.name) == 'string' and #file.name > 0, 'malformed file name')
+		assert(file.name:find('\x00', 1, true) == nil, 'malformed file name')
+
+		local lower_name = string.lower(file.name)
+		assert(not check_duplicate[lower_name], 'duplicate file name')
+		check_duplicate[lower_name] = true
+	end
+
+	table.sort(files, function(a, b)
+		return string.lower(a.name) < string.lower(b.name)
+	end)
+
+	for _, file in ipairs(files) do
+		assert(type(file.mode) == 'number' and mode_to_name(file.name), 'malformed file mode')
+		assert(type(file.hash) == 'string' and #file.hash == odb.oid_type.hex_length, 'malformed file hash')
 
 		table.insert(encoded, string.format('%06o %s\0%s', file.mode, file.name, odb.oid_type:hex2bin(file.hash)))
 	end
@@ -131,6 +145,10 @@ function object.commit(odb, options)
 
 	local encoded = { 'tree ' .. options.tree.oid }
 	if options.parents then
+		table.sort(options.parents, function(a, b)
+			return a.oid < b.oid
+		end)
+
 		for _, parent in ipairs(options.parents) do
 			assert(getmetatable(parent) == object_mt, 'invalid commit parent')
 			table.insert(encoded, 'parent ' .. parent.oid)
@@ -149,7 +167,7 @@ function object.commit(odb, options)
 end
 
 ---@param odb git.odb
----@param options { object: git.object, tag: string, message: string, tagger: git.person, signing_key: sshkey.key|nil }
+---@param options { object: git.object, tag: string, message: string, tagger: git.person, signing_key: sshkey.key|nil, signing_namespace: string|nil }
 ---@return git.object
 function object.tag(odb, options)
 	assert(getmetatable(options.object) == object_mt, 'invalid tag object')
@@ -297,6 +315,11 @@ function object:parse_tag()
 		else
 			error('unknown tag field: ' .. name)
 		end
+	end
+
+	if not tag.tagger then
+		print('invalid tag object', tag.tag, tag.object)
+		tag.tagger = {}
 	end
 
 	assert(tag.object, 'missing object field in tag object')

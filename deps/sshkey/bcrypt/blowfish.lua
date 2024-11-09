@@ -1,5 +1,7 @@
 local bit = require('bit')
 
+local bxor, band, rshift = bit.bxor, bit.band, bit.rshift
+
 local function init_state()
 	return {
 		sboxes = {
@@ -1059,45 +1061,57 @@ local function init_state()
 	}
 end
 
-local function unsigned(x)
-	if x < 0 then
-		return x + 0x100000000
-	end
-
-	return x
+local function read_u32be(data, offset)
+	local a, b, c, d = string.byte(data, offset, offset + 3)
+	return a * 0x1000000 + b * 0x10000 + c * 0x100 + d
 end
 
-local function toword(data, state)
-	if state.j == #data + 1 then
-		state.j = 1
-	end
+-- local function half_round(state, i, j, n)
+-- 	local a = bit.band(bit.rshift(j, 24), 0xff)
+-- 	local b = bit.band(bit.rshift(j, 16), 0xff)
+-- 	local c = bit.band(bit.rshift(j, 8), 0xff)
+-- 	local d = bit.band(j, 0xff)
 
-	local offset = state.j
-	state.j = state.j + 4
-	return (string.unpack('>I4', data, offset))
-end
-
-local function half_round(state, i, j, n)
-	local a = bit.band(bit.rshift(j, 24), 0xff)
-	local b = bit.band(bit.rshift(j, 16), 0xff)
-	local c = bit.band(bit.rshift(j, 8), 0xff)
-	local d = bit.band(j, 0xff)
-
-	local w = state.sboxes[1][a + 1]
-	local x = state.sboxes[2][b + 1]
-	local y = state.sboxes[3][c + 1]
-	local z = state.sboxes[4][d + 1]
-	return bit.bxor(i, bit.bxor(w + x, y) + z, state.subkeys[n])
-end
+-- 	local w = state.sboxes[1][a + 1]
+-- 	local x = state.sboxes[2][b + 1]
+-- 	local y = state.sboxes[3][c + 1]
+-- 	local z = state.sboxes[4][d + 1]
+-- 	return bit.bxor(i, bit.bxor(w + x, y) + z, state.subkeys[n])
+-- end
 
 local function encipher(state, l, r)
-	l = bit.bxor(l, state.subkeys[1])
-	for i = 2, 17, 2 do
-		r = half_round(state, r, l, i)
-		l = half_round(state, l, r, i + 1)
+	local subkeys = state.subkeys
+	local sbox0, sbox1, sbox2, sbox3 = state.sboxes[1], state.sboxes[2], state.sboxes[3], state.sboxes[4]
+
+	l = bxor(l, subkeys[1])
+	for i = 2, 16, 2 do
+		do
+			local a = band(rshift(l, 24), 0xff)
+			local b = band(rshift(l, 16), 0xff)
+			local c = band(rshift(l, 8), 0xff)
+			local d = band(l, 0xff)
+
+			local w = sbox0[a + 1]
+			local x = sbox1[b + 1]
+			local y = sbox2[c + 1]
+			local z = sbox3[d + 1]
+			r = bxor(r, bxor(w + x, y) + z, subkeys[i])
+		end
+
+		do
+			local a = band(rshift(r, 24), 0xff)
+			local b = band(rshift(r, 16), 0xff)
+			local c = band(rshift(r, 8), 0xff)
+			local d = band(r, 0xff)
+
+			local w = sbox0[a + 1]
+			local x = sbox1[b + 1]
+			local y = sbox2[c + 1]
+			local z = sbox3[d + 1]
+			l = bxor(l, bxor(w + x, y) + z, subkeys[i + 1])
+		end
 	end
-	r = bit.bxor(r, state.subkeys[18])
-	return unsigned(r), unsigned(l)
+	return bxor(r, subkeys[18]), l
 end
 
 local function encrypt(state, data)
@@ -1110,11 +1124,17 @@ local function encrypt(state, data)
 end
 
 local function expand0(state, key)
-	state.j = 1
+	assert(#key % 4 == 0, 'key length must be a multiple of 4')
+
+	local j = 1
 	for i = 1, 18 do
-		state.subkeys[i] = bit.bxor(state.subkeys[i], toword(key, state))
+		state.subkeys[i] = bxor(state.subkeys[i], read_u32be(key, j))
+
+		j = j + 4
+		if j > #key then
+			j = 1
+		end
 	end
-	state.j = nil
 
 	local l, r = 0, 0
 	for i = 1, 18, 2 do
@@ -1133,31 +1153,48 @@ local function expand0(state, key)
 end
 
 local function expand(state, data, key)
-	state.j = 1
+	assert(#data % 8 == 0, 'data length must be a multiple of 8')
+	assert(#key % 4 == 0, 'key length must be a multiple of 4')
+
+	local j = 1
 	for i = 1, 18 do
-		state.subkeys[i] = bit.bxor(state.subkeys[i], toword(key, state))
+		state.subkeys[i] = bxor(state.subkeys[i], read_u32be(key, j))
+
+		j = j + 4
+		if j > #key then
+			j = 1
+		end
 	end
 
-	state.j = 1
+	j = 1
 	local l, r = 0, 0
 	for i = 1, 18, 2 do
-		l = bit.bxor(l, toword(data, state))
-		r = bit.bxor(r, toword(data, state))
+		l = bxor(l, read_u32be(data, j))
+		r = bxor(r, read_u32be(data, j + 4))
 		l, r = encipher(state, l, r)
 		state.subkeys[i] = l
 		state.subkeys[i + 1] = r
+
+		j = j + 8
+		if j > #data then
+			j = 1
+		end
 	end
 
 	for i = 1, 4 do
 		for k = 1, 256, 2 do
-			l = bit.bxor(l, toword(data, state))
-			r = bit.bxor(r, toword(data, state))
+			l = bxor(l, read_u32be(data, j))
+			r = bxor(r, read_u32be(data, j + 4))
 			l, r = encipher(state, l, r)
 			state.sboxes[i][k] = l
 			state.sboxes[i][k + 1] = r
+
+			j = j + 8
+			if j > #data then
+				j = 1
+			end
 		end
 	end
-	state.j = nil
 end
 
 return {

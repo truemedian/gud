@@ -35,6 +35,7 @@ for remote, hash in my_refdb:remotes() do
 end
 
 print('starting search')
+local start = os.time()
 
 local n, f = 0, 0
 while true do
@@ -48,7 +49,7 @@ while true do
         -- local o = assert(my_odb:read(next_hash), 'missing object ' .. next_hash)
 
         if n % 10000 == 0 then
-            print('enumerated ' .. n .. ' objects')
+            print('enumerated ' .. n .. ' objects', f, os.time() - start)
         end
 
         if s and o then

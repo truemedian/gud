@@ -1,6 +1,8 @@
 local openssl = require('openssl')
 local asn1 = openssl.asn1
 
+local buffer = require('sshkey/format/buffer')
+
 local function keytype_to_curve(kt)
 	if kt == 'ecdsa-sha2-nistp256' then
 		return 'nistp256'
@@ -40,11 +42,15 @@ end
 ---@param key sshkey.key.ecdsa
 ---@return string
 local function serialize_public(key)
-	return string.pack('>s4s4s4', key.kt, keytype_to_curve(key.kt), key.pk_pt)
+	local encoder = buffer.write()
+	encoder:write_string(key.kt)
+	encoder:write_string(keytype_to_curve(key.kt))
+	encoder:write_string(key.pk_pt)
+	return encoder:encode()
 end
 
 ---@param key sshkey.key.ecdsa
----@param buf sshkey.buffer
+---@param buf sshkey.read_buffer
 ---@return boolean|nil, string|nil
 local function deserialize_public(key, buf)
 	local curve = buf:read_string()
@@ -73,7 +79,7 @@ local function deserialize_public(key, buf)
 end
 
 ---@param key sshkey.key.ecdsa
----@param buf sshkey.buffer
+---@param buf sshkey.read_buffer
 ---@return boolean|nil, string|nil
 local function deserialize_private(key, buf)
 	local pk_success, pk_err = deserialize_public(key, buf)
@@ -81,8 +87,7 @@ local function deserialize_private(key, buf)
 		return nil, pk_err
 	end
 
-	local d = buf:read_string()
-	d = openssl.bn.text(d)
+	local d = openssl.bn.text(buf:read_string())
 
 	local ec_name = keytype_to_nid(key.kt)
 	local ec_group = openssl.ec.group(ec_name)
@@ -125,8 +130,13 @@ local function sign_raw(key, data)
 	local r = signed:sub(r_start, r_stop)
 	local s = signed:sub(s_start, s_stop)
 
-	local packed = string.pack('>s4s4', r, s)
-	return string.pack('>s4s4', key.kt, packed)
+	local packed_encoder = buffer.write()
+	packed_encoder:write_string(r)
+	packed_encoder:write_string(s)
+	local encoder = buffer.write()
+	encoder:write_string(key.kt)
+	encoder:write_string(packed_encoder:encode())
+	return encoder:encode()
 end
 
 ---@param key sshkey.key.ecdsa
@@ -134,7 +144,9 @@ end
 ---@param data string
 ---@return boolean, string|nil
 local function verify_raw(key, signature, data)
-	local format, raw_signature = string.unpack('>s4s4', signature)
+	local packed_decoder = buffer.read(signature)
+	local format = packed_decoder:read_string()
+
 	if format ~= key.kt then
 		return false, 'ecdsa.verify: format mismatch'
 	end
@@ -145,15 +157,24 @@ local function verify_raw(key, signature, data)
 		return false, 'ecdsa.verify: allocation failed'
 	end
 
-	local r, s = string.unpack('>s4s4', raw_signature)
-	r = openssl.bn.text(r)
-	s = openssl.bn.text(s)
+	local signature_decoder = buffer.read(packed_decoder:read_string())
+	local r = openssl.bn.text(signature_decoder:read_string())
+	local s = openssl.bn.text(signature_decoder:read_string())
 
 	r = asn1.new_integer(r)
 	s = asn1.new_integer(s)
 
 	local real_signature = asn1.put_object(asn1.SEQUENCE, 0, r:i2d() .. s:i2d(), true)
-	return digest:verify(real_signature, data)
+	local verified, err = digest:verify(real_signature, data)
+	if not verified then
+		if err then
+			return false, 'ecdsa.verify: ' .. err
+		else
+			return false, 'ecdsa.verify: verification failed for unknown reason'
+		end
+	end
+
+	return true
 end
 
 local ecdsa_nistp256 = {

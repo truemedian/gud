@@ -1,8 +1,8 @@
 local fs = require('fs')
 local miniz = require('miniz')
 
-local common = require('common')
-local object = require('object')
+local common = require('git/common')
+local object = require('git/object')
 
 ---@class git.odb.backend.loose : git.odb.backend
 ---@field objects_dir string

@@ -1,7 +1,7 @@
 local openssl = require('openssl')
 
-local bcrypt = require('sshkey/bcrypt')
-local buffer = require('sshkey/buffer')
+local bcrypt = require('sshkey/bcrypt/bcrypt')
+local buffer = require('sshkey/format/buffer')
 
 local ciphername_translation = {
 	['3des-ctr'] = 'des-ede3-cbc',
@@ -16,11 +16,11 @@ local ciphername_translation = {
 }
 
 local impls = {
-	require('sshkey/impl/ed25519').ed25519,
-	require('sshkey/impl/rsa').rsa,
-	require('sshkey/impl/ecdsa').ecdsa_nistp256,
-	require('sshkey/impl/ecdsa').ecdsa_nistp384,
-	require('sshkey/impl/ecdsa').ecdsa_nistp521,
+	require('sshkey/pkey/ed25519').ed25519,
+	require('sshkey/pkey/rsa').rsa,
+	require('sshkey/pkey/ecdsa').ecdsa_nistp256,
+	require('sshkey/pkey/ecdsa').ecdsa_nistp384,
+	require('sshkey/pkey/ecdsa').ecdsa_nistp521,
 }
 
 local function get_keytype_impl(kt)
@@ -45,7 +45,7 @@ local function decrypt_section(ciphername, kdfname, kdfoptions, data, passphrase
 	end
 
 	if not passphrase or passphrase == '' then
-		return nil, 'passphrase required'
+		return nil, 'decrypt_section: passphrase required'
 	end
 
 	local cipher, cipher_info, key
@@ -53,11 +53,11 @@ local function decrypt_section(ciphername, kdfname, kdfoptions, data, passphrase
 		cipher = openssl.cipher.get(ciphername_translation[ciphername])
 		cipher_info = cipher:info()
 	else
-		return nil, 'unknown cipher: ' .. ciphername
+		return nil, 'decrypt_section: unknown cipher: ' .. ciphername
 	end
 
 	-- parse necessary kdf options
-	local kdf_buf = buffer(kdfoptions)
+	local kdf_buf = buffer.read(kdfoptions)
 	if kdfname == 'bcrypt' then
 		local salt = kdf_buf:read_string()
 		local rounds = kdf_buf:read_u32()
@@ -65,13 +65,26 @@ local function decrypt_section(ciphername, kdfname, kdfoptions, data, passphrase
 		local keylen = cipher_info.key_length + cipher_info.iv_length
 		key = bcrypt.pbkdf(passphrase, salt, keylen, rounds)
 	else
-		return nil, 'unknown kdf: ' .. kdfname
+		return nil, 'decrypt_section: unknown kdf: ' .. kdfname
+	end
+
+	if #data % cipher_info.block_size ~= 0 then
+		return nil, 'decrypt_section: invalid data length'
 	end
 
 	-- decrypt private key data
 	local dc_key = key:sub(1, cipher_info.key_length)
 	local dc_iv = key:sub(cipher_info.key_length + 1)
-	return cipher:decrypt(data, dc_key, dc_iv)
+	local decrypted, err = cipher:decrypt(data, dc_key, dc_iv, false)
+	if not decrypted then
+		if err then
+			return nil, 'decrypt_section: ' .. err
+		else
+			return nil, 'decrypt_section: decryption failed for unknown reason'
+		end
+	end
+
+	return decrypted
 end
 
 ---Decode an OpenSSH private key from the given data and passphrase.
@@ -79,9 +92,9 @@ end
 ---@param passphrase string|nil
 ---@return sshkey.key|nil, string|nil
 local function decode_openssh_private_key(data, passphrase)
-	local buf = buffer(data)
+	local buf = buffer.read(data)
 	if buf:read_bytes(15) ~= 'openssh-key-v1\x00' then
-		return nil, 'invalid openssh private key: bad magic'
+		return nil, 'decode_openssh_private_key: bad magic'
 	end
 
 	local ciphername = buf:read_string()
@@ -94,20 +107,20 @@ local function decode_openssh_private_key(data, passphrase)
 
 	-- check for multiple keys and extraneous data
 	if nkeys > 1 then
-		return nil, 'invalid openssh private key: multiple keys'
+		return nil, 'decode_openssh_private_key: multiple keys'
 	end
 
 	if buf.loc ~= #buf.str + 1 then
-		return nil, 'invalid openssh private key: extraneous data'
+		return nil, 'decode_openssh_private_key: extraneous data'
 	end
 
 	local key = {}
 	-- parse public key first before even attempting to decrypt private key
-	local pubkey_buf = buffer(public_key_data)
+	local pubkey_buf = buffer.read(public_key_data)
 	key.kt = pubkey_buf:read_string()
 	key.impl = get_keytype_impl(key.kt)
 	if not key.impl then
-		return nil, 'unknown key type: ' .. key.kt
+		return nil, 'decode_openssh_private_key: unknown key type: ' .. key.kt
 	end
 
 	local pk_success, err
@@ -124,17 +137,17 @@ local function decode_openssh_private_key(data, passphrase)
 	end
 
 	-- ensure the decrypted private key is valid
-	local private_key_buf = buffer(private_key_encrypted)
+	local private_key_buf = buffer.read(private_key_data)
 	local check1 = private_key_buf:read_u32()
 	local check2 = private_key_buf:read_u32()
 	if check1 ~= check2 then
-		return nil, 'invalid openssh private key: decryption failed'
+		return nil, 'decode_openssh_private_key: decryption failed'
 	end
 
 	-- todo: handle certificates
 	local privkey_keytype = private_key_buf:read_string()
 	if privkey_keytype ~= key.kt then
-		return nil, 'invalid openssh private key: public and private key types do not match'
+		return nil, 'decode_openssh_private_key: public and private key types do not match'
 	end
 
 	local sk_success
@@ -148,28 +161,28 @@ local function decode_openssh_private_key(data, passphrase)
 	local padding = private_key_buf:left()
 	for i = 1, #padding do
 		if padding:byte(i) ~= i then
-			return nil, 'invalid openssh private key: invalid padding'
+			return nil, 'decode_openssh_private_key: invalid padding'
 		end
 	end
 
 	do -- checksum to ensure private key and public key match
 		local digest = openssl.digest.signInit(nil, key.sk)
 		if not digest then
-			return nil, 'allocation failed'
+			return nil, 'decode_openssh_private_key: allocation failed'
 		end
 
 		local signature, sig_err = digest:sign('signature-check')
 		if not signature then
-			return nil, 'invalid openssh private key: ' .. sig_err
+			return nil, 'decode_openssh_private_key: ' .. sig_err
 		end
 
 		digest = openssl.digest.verifyInit(nil, key.pk)
 		if not digest then
-			return nil, 'allocation failed'
+			return nil, 'decode_openssh_private_key: allocation failed'
 		end
 
 		if not digest:verify(signature, 'signature-check') then
-			return nil, 'invalid openssh private key: public and private key do not match'
+			return nil, 'decode_openssh_private_key: public and private key do not match'
 		end
 	end
 
@@ -181,26 +194,31 @@ end
 ---@param passphrase string|nil
 ---@return sshkey.key|nil, string|nil
 local function decode_pkcs_private_key(data, passphrase)
-	local sk, sk_err = openssl.pkey.read(data, true, passphrase)
+	local sk, sk_err = openssl.pkey.read(data, true, nil, passphrase)
 	if not sk then
-		return nil, 'parse private key failed: ' .. sk_err
+		return nil, 'decode_pkcs_private_key: ' .. sk_err
 	end
 
 	local pk = sk:get_public()
 	if not pk then
-		return nil, 'extract public key failed'
+		return nil, 'decode_pkcs_private_key: failed to extract public key'
 	end
 
 	local info = sk:parse()
 	if not info then
-		return nil, 'parse private key failed'
+		return nil, 'decode_pkcs_private_key: parse failed'
 	end
 
 	local key = { sk = sk, pk = pk }
-	if info.type == 'rsa' then
+	if info.type == 'RSA' then
 		key.kt = 'ssh-rsa'
+	elseif info.type == 'EC' then
+		key.kt = 'ecdsa-sha2-nistp' .. info.bits
+
+		local ec = info.ec:parse()
+		key.pk_pt = ec.group:point2oct(ec.pub_key)
 	else
-		return nil, 'unsupported key type: ' .. info.type
+		return nil, 'decode_pkcs_private_key: unsupported key type: ' .. info.type
 	end
 
 	key.impl = get_keytype_impl(key.kt)
@@ -214,21 +232,21 @@ local function decode_openssh_public_key(data)
 	local prefix, encoded, comment = data:match('^(%S+) (%S+)%s*(.*)$')
 	local decoded = openssl.base64(encoded, false, true)
 
-	local buf = buffer(decoded)
+	local buf = buffer.read(decoded)
 	local kt = buf:read_string()
 	if kt ~= prefix then
-		return nil, 'invalid openssh public key: key type mismatch'
+		return nil, 'decode_openssh_public_key: key type mismatch'
 	end
 
 	local impl = get_keytype_impl(kt)
 	if not impl then
-		return nil, 'unknown key type: ' .. kt
+		return nil, 'decode_openssh_public_key: unknown key type: ' .. kt
 	end
 
 	local key = { kt = kt, impl = impl, comment = comment }
 	local pk_success, pk_err = impl.deserialize_public(key, buf)
 	if not pk_success then
-		return nil, pk_err
+		return nil, 'decode_openssh_public_key: ' .. pk_err
 	end
 
 	return key
@@ -240,19 +258,24 @@ end
 local function decode_pkcs_public_key(data)
 	local pk, pk_err = openssl.pkey.read(data, false)
 	if not pk then
-		return nil, 'parse public key failed: ' .. pk_err
+		return nil, 'decode_pkcs_public_key: ' .. pk_err
 	end
 
 	local info = pk:parse()
 	if not info then
-		return nil, 'parse public key failed'
+		return nil, 'decode_pkcs_public_key: parse failed'
 	end
 
 	local key = { sk = pk, pk = pk }
-	if info.type == 'rsa' then
+	if info.type == 'RSA' then
 		key.kt = 'ssh-rsa'
+	elseif info.type == 'EC' then
+		key.kt = 'ecdsa-sha2-nistp' .. info.bits
+
+		local ec = info.ec:parse()
+		key.pk_pt = ec.group:point2oct(ec.pub_key)
 	else
-		return nil, 'unsupported key type: ' .. info.type
+		return nil, 'decode_pkcs_public_key: unsupported key type: ' .. info.type
 	end
 
 	key.impl = get_keytype_impl(key.kt)

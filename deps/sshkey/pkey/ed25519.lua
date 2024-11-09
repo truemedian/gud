@@ -1,6 +1,8 @@
 local openssl = require('openssl')
 local asn1 = openssl.asn1
 
+local buffer = require('sshkey/format/buffer')
+
 local oid = asn1.new_object('1.3.101.112')
 local algo_id = asn1.put_object(asn1.SEQUENCE, 0, oid:i2d(), true)
 local pki_version = asn1.new_integer(0):i2d()
@@ -19,11 +21,14 @@ end
 ---@param key sshkey.key.ed25519
 ---@return string
 local function serialize_public(key)
-	return string.pack('>s4s4', 'ed25519', key.pk_s)
+	local encoder = buffer.write()
+	encoder:write_string(key.kt)
+	encoder:write_string(key.pk_s)
+	return encoder:encode()
 end
 
 ---@param key sshkey.key.ed25519
----@param buf sshkey.buffer
+---@param buf sshkey.read_buffer
 ---@return boolean|nil, string|nil
 local function deserialize_public(key, buf)
 	local pk_s = buf:read_string()
@@ -46,7 +51,7 @@ local function deserialize_public(key, buf)
 end
 
 ---@param key sshkey.key.ed25519
----@param buf sshkey.buffer
+---@param buf sshkey.read_buffer
 ---@return boolean|nil, string|nil
 local function deserialize_private(key, buf)
 	local pk_s = buf:read_string()
@@ -80,7 +85,14 @@ local function sign_raw(key, data)
 	end
 
 	local signed = digest:sign(data)
-	return string.pack('>s4s4', 'ssh-ed25519', signed)
+	if not signed then
+		return nil, 'ed25519.sign: signing failed'
+	end
+
+	local encoder = buffer.write()
+	encoder:write_string(key.kt)
+	encoder:write_string(signed)
+	return encoder:encode()
 end
 
 ---@param key sshkey.key.ed25519
@@ -88,17 +100,27 @@ end
 ---@param data string
 ---@return boolean, string|nil
 local function verify_raw(key, signature, data)
-	local format, raw_signature = string.unpack('>s4s4', signature)
-	if format ~= 'ssh-ed25519' then
+	local signature_decoder = buffer.read(signature)
+	local format = signature_decoder:read_string()
+	if format ~= key.kt then
 		return false
 	end
 
 	local digest = openssl.digest.verifyInit(nil, key.pk)
 	if not digest then
-		return false, 'ed25519.sign: allocation failed'
+		return false, 'ed25519.verify: allocation failed'
 	end
 
-	return digest:verify(raw_signature, data)
+	local verified, err = digest:verify(signature_decoder:read_string(), data)
+	if not verified then
+		if err then
+			return false, 'ed25519.verify: ' .. err
+		else
+			return false, 'ed25519.verify: verification failed for unknown reason'
+		end
+	end
+
+	return true
 end
 
 local ed25519_impl = {
