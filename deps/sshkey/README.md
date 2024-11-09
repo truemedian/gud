@@ -112,3 +112,41 @@ Verifies a SSH signature of the data using the public key.
 
 - `valid` (boolean): `true` if the signature is valid, `false` otherwise.
 - `error_message` (string or nil): The error message if the signature could not be verified, or `nil` if the signature was verified successfully.
+
+## Examples
+
+```lua
+local data_private = io.open('private_key'):read('*a')      -- the private key, maybe encrypted using `password`
+local data_public = io.open('public_key'):read('*a')        -- the public key
+local data_signature = io.open('public_key.sig'):read('*a') -- a signature of the `data_public` using the private key
+
+local pk, pk_e = sshkey.load_public(data_public)
+if not pk then
+  error('decode public key' .. pk_e)
+end
+
+local sk, sk_e = sshkey.load_private(data_private, 'password')
+if not sk then
+  error('decode private key' .. sk_e)
+end
+
+local fp_sk, fp_pk = sshkey.fingerprint(sk), sshkey.fingerprint(pk)
+if fp_sk ~= fp_pk then
+  error("public and private key fingerprints didn't match")
+end
+
+local sig, sig_e = sshkey.sign(sk, data_public, 'something')
+if not sig then
+  error('create signature' .. v1_e)
+end
+
+local v1, v1_e = sshkey.verify(pk, sig, data_public, 'something')
+if not v1 then
+  error('validate created signature' .. v1_e)
+end
+
+local v2, v2_e = sshkey.verify(pk, data_signature, data_public, 'something')
+if not v2 then
+  error('validate existing signature' .. v2_e)
+end
+```
