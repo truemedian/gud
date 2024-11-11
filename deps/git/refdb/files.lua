@@ -8,14 +8,17 @@ local refdb_files = {}
 local refdb_files_mt = { __index = refdb_files }
 
 ---@param repository_dir string
-function refdb_files.load(repository_dir)
+function refdb_files.new(repository_dir)
 	return setmetatable({
 		repository_dir = assert(repository_dir, 'missing repository directory'),
 	}, refdb_files_mt)
 end
 
+function refdb_files:init() end
+
 --- Reads an prefixed reference. Must begin with `refs/`.
 ---@param ref string
+---@return git.oid|nil, string|nil
 function refdb_files:read(ref)
 	assert(ref:sub(1, 5) == 'refs/', 'reference must start with refs/')
 	assert(ref:find('../', 1, true) == nil, 'reference cannot contain extraneous path components')
@@ -37,14 +40,34 @@ function refdb_files:read(ref)
 			return ref_line
 		end
 	end
+
+	return nil, 'reference not found in the database'
 end
 
 --- Reads an unprefixed reference. May be either a tag or a branch head.
 ---@param ref string
+---@return git.oid|nil, string|nil
 function refdb_files:read_any(ref)
 	assert(ref:find('../', 1, true) == nil, 'reference cannot contain extraneous path components')
 
 	return self:read('refs/heads/' .. ref) or self:read('refs/tags/' .. ref)
+end
+
+---@param ref string
+---@param oid git.oid
+---@return boolean, string|nil
+function refdb_files:write(ref, oid)
+	assert(ref:sub(1, 5) == 'refs/', 'reference must start with refs/')
+	assert(ref:find('../', 1, true) == nil, 'reference cannot contain extraneous path components')
+
+	local ref_file = self.repository_dir .. '/' .. ref
+
+	local success, err = common.write_file(ref_file, oid)
+	if not success then
+		return false, err
+	end
+
+	return true
 end
 
 local function iterate_refs(self, prefix)

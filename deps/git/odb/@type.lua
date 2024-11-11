@@ -24,10 +24,8 @@ end
 
 function backend:refresh() end
 
----@param oid git.oid
----@param data string
----@param kind git.object.kind
+---@param obj git.object
 ---@return boolean, nil|string
-function backend:write(oid, data, kind)
+function backend:write(obj)
 	return false
 end

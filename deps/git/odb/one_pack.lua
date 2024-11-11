@@ -1,5 +1,5 @@
-local miniz = require('miniz')
 local bit = require('bit')
+local miniz = require('miniz')
 
 local common = require('git/common')
 local object = require('git/object')
@@ -75,6 +75,8 @@ function backend_onepack.load(odb, objects_dir, pack_hash)
 	return self
 end
 
+function backend_onepack:init() end
+
 ---@param odb git.odb
 ---@param oid git.oid
 ---@return git.object|nil, nil|string
@@ -129,7 +131,7 @@ function backend_onepack:_read_at_offset(odb, offset)
 			real_kind = 'tag'
 		end
 
-		local obj = object.create(odb, real_kind, inflated_data, oid)
+		local obj = object.from_raw(real_kind, inflated_data, oid)
 		odb:_cache_object(oid, obj)
 		return obj
 	elseif kind == 6 or kind == 7 then
@@ -140,10 +142,10 @@ function backend_onepack:_read_at_offset(odb, offset)
 			base_offset, header_offset = common.read_pack_varoffset(self.packfile, header_offset)
 			base_object = self:_read_at_offset(odb, offset - base_offset)
 		elseif kind == 7 then
-			local binary_ref = self.packfile:sub(header_offset, header_offset + odb.oid_type.bin_length - 1) ---@cast binary_ref git.oid_binary
-			header_offset = header_offset + odb.oid_type.bin_length
+			local binary_ref = self.packfile:sub(header_offset, header_offset + odb.oid.bin_length - 1) ---@cast binary_ref git.oid_binary
+			header_offset = header_offset + odb.oid.bin_length
 
-			local reference = odb.oid_type:bin2hex(binary_ref)
+			local reference = odb.oid.bin2hex(binary_ref)
 			base_object = odb:read(reference)
 		end
 
@@ -158,7 +160,7 @@ function backend_onepack:_read_at_offset(odb, offset)
 		base_size, delta_offset = common.read_pack_varsize(delta_data, delta_offset)
 		result_size, delta_offset = common.read_pack_varsize(delta_data, delta_offset)
 
-		local base_data = base_object.data
+		local base_data = base_object.raw
 		assert(base_size == #base_data, 'delta base object size does not match expected size')
 
 		local parts = {}
@@ -221,7 +223,7 @@ function backend_onepack:_read_at_offset(odb, offset)
 		local result_data = table.concat(parts)
 		assert(#result_data == result_size, 'delta result size does not match expected size')
 
-		local obj = object.create(odb, base_object.kind, result_data, oid)
+		local obj = object.from_raw(base_object.kind, result_data, oid)
 		odb:_cache_object(oid, obj)
 		return obj
 	end
@@ -252,10 +254,10 @@ function backend_onepack:_read_header_at_offset(odb, offset)
 
 		real_kind = self:_read_header_at_offset(odb, base_offset)
 	elseif kind == 7 then
-		local binary_ref = self.packfile:sub(header_offset, header_offset + odb.oid_type.bin_length - 1) ---@cast binary_ref git.oid_binary
-		header_offset = header_offset + odb.oid_type.bin_length
+		local binary_ref = self.packfile:sub(header_offset, header_offset + odb.oid.bin_length - 1) ---@cast binary_ref git.oid_binary
+		header_offset = header_offset + odb.oid.bin_length
 
-		local reference = odb.oid_type:bin2hex(binary_ref)
+		local reference = odb.oid.bin2hex(binary_ref)
 
 		real_kind = odb:read_header(reference)
 	end
@@ -297,10 +299,10 @@ function backend_onepack:refresh(odb)
 	local index_path = idx_path(self.objects_dir, self.pack_hash)
 	local packfile_path = pack_path(self.objects_dir, self.pack_hash)
 
-	local idx = common.read_file(index_path)
+	local idx = assert(common.read_file(index_path))
 	assert(idx:sub(1, 8) == '\xfftOc\x00\x00\x00\x02', 'invalid packfile index signature')
 
-	local pack = common.read_file(packfile_path)
+	local pack = assert(common.read_file(packfile_path))
 
 	self.packfile = pack
 
@@ -319,8 +321,8 @@ function backend_onepack:refresh(odb)
 	for i = 0, self.fanout[256] - 1 do
 		local offset = hashes_start + i * 20
 
-		local binhash = idx:sub(offset, offset + 19) ---@cast binhash git.oid_binary
-		self.hashes[i + 1] = odb.oid_type:bin2hex(binhash)
+		local binhash = idx:sub(offset, offset + odb.oid.bin_length - 1) ---@cast binhash git.oid_binary
+		self.hashes[i + 1] = odb.oid.bin2hex(binhash)
 
 		assert(i == 0 or self.hashes[i + 1] > self.hashes[i], 'packfile index is not sorted')
 
@@ -367,11 +369,9 @@ function backend_onepack:refresh(odb)
 	end
 end
 
----@param oid git.oid
----@param data string
----@param kind git.object.kind
+---@param obj git.object
 ---@return boolean, nil|string
-function backend_onepack:write(oid, data, kind)
+function backend_onepack:write(obj)
 	return false
 end
 

@@ -30,6 +30,13 @@ local function load_public(data)
 	end
 end
 
+---Encode a SSH public key from the given key.
+---@param key sshkey.key
+---@return string
+local function save_public(key)
+	return openssh.save_public_openssh(key)
+end
+
 ---Generate a fingerprint for the given key.
 ---@param key sshkey.key
 ---@return string
@@ -160,6 +167,7 @@ end
 return {
 	load_private = load_private,
 	load_public = load_public,
+	save_public = save_public,
 	fingerprint = fingerprint,
 	verify = verify,
 	sign = sign,

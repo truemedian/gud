@@ -1,5 +1,6 @@
 local bit = require('bit')
 local fs = require('fs')
+local path = require('path')
 
 local common = {}
 
@@ -173,29 +174,29 @@ function common.read_pack_varoffset(data, offset)
 	error('variable length offset too large')
 end
 
----@param path string
----@return string
-function common.read_file(path)
-	local fd = fs.openSync(path, 'r')
+---@param file_path string
+---@return string|nil, string|nil
+function common.read_file(file_path)
+	local fd, open_err = fs.openSync(file_path, 'r')
 	if not fd then
-		error('ENOENT: ' .. path)
+		return nil, open_err
 	end
 
 	local stat, stat_err = fs.fstatSync(fd)
 	if not stat then
 		fs.closeSync(fd)
-		error(stat_err)
+		return nil, stat_err
 	end
 
 	if stat.size == 0 then
 		fs.closeSync(fd)
-		error('EINVAL: file is empty')
+		return nil, 'EINVAL: file is empty'
 	end
 
 	local first, read_err = fs.readSync(fd, stat.size)
 	if not first then
 		fs.closeSync(fd)
-		error(read_err)
+		return nil, read_err
 	end
 
 	if #first == stat.size then
@@ -212,7 +213,7 @@ function common.read_file(path)
 		chunk, read_err = fs.readSync(fd, stat.size, offset)
 		if not chunk then
 			fs.closeSync(fd)
-			error(read_err)
+			return nil, read_err
 		end
 
 		if #chunk == 0 then
@@ -225,14 +226,74 @@ function common.read_file(path)
 
 	fs.closeSync(fd)
 	if offset ~= stat.size then
-		error('EINVAL: file changed during read')
+		return nil, 'EINVAL: file changed during read'
 	end
 
-	local concat = table.concat(parts)
-	parts = nil
+	return table.concat(parts)
+end
 
-	collectgarbage() -- we may have allocated a lot of memory, try to free it
-	return concat
+---@param file_path string
+---@param data string
+function common.write_file(file_path, data)
+	local fd, open_err = fs.openSync(file_path, 'w')
+	if not fd then
+		if open_err:sub(1, 7) == 'ENOENT:' then
+			local success, err = common.mkdirp(path.dirname(file_path))
+			if not success then
+				return false, err
+			end
+
+			fd, open_err = fs.openSync(file_path, 'w')
+		end
+
+		if not fd then
+			return false, open_err
+		end
+	end
+
+	local written, write_err = fs.writeSync(fd, 0, data)
+	if not written then
+		fs.closeSync(fd)
+		return false, write_err
+	end
+
+	while written < #data do
+		local chunk
+		chunk, write_err = fs.writeSync(fd, written, data:sub(written + 1))
+		if not chunk then
+			fs.closeSync(fd)
+			return false, write_err
+		end
+
+		written = written + chunk
+	end
+
+	fs.closeSync(fd)
+	return true
+end
+
+function common.mkdirp(file_path)
+	local success, err = fs.mkdirSync(file_path)
+	if success then
+		return true
+	end
+
+	if err:sub(1, 7) ~= 'ENOENT:' then
+		return false, err
+	end
+
+	local dirname = path.dirname(file_path)
+	success, err = common.mkdirp(dirname)
+	if not success then
+		return false, err
+	end
+
+	success, err = fs.mkdirSync(file_path)
+	if not success then
+		return false, err
+	end
+
+	return true
 end
 
 return common

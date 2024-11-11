@@ -1,15 +1,16 @@
 ---@class git.odb
----@field oid_type git.oid_type
+---@field oid git.oid_type
 ---@field backends git.odb.backend[]
 ---@field cache table<git.oid, git.object>
 local odb = {}
+local odb_mt = { __index = odb }
 
 function odb.new(oid_type)
 	return setmetatable({
-		oid_type = oid_type,
+		oid = oid_type,
 		backends = {},
 		cache = setmetatable({}, { __mode = 'v' }),
-	}, { __index = odb })
+	}, odb_mt)
 end
 
 --- Add a backend to the database.
@@ -84,20 +85,17 @@ end
 
 --- Write an object to the database. The first backend that successfully writes
 --- the object will be used.
----@param data string
----@param kind git.object.kind
+---@param obj git.object
 ---@return git.oid|nil, string|nil
-function odb:write(data, kind)
-	local oid = self.oid_type:digest(data, kind)
-
+function odb:write(obj)
 	for i = 1, #self.backends do
-		if self.backends[i]:write(oid, data, kind) then
+		if self.backends[i]:write(obj) then
 			-- write succeeded, return the oid that was written
-			return oid
+			return obj.oid
 		end
 	end
 
-	return nil, 'could not write object ' .. oid .. ' to database'
+	return nil, 'could not write object ' .. obj.oid .. ' to database'
 end
 
 function odb:_cache_object(oid, object)

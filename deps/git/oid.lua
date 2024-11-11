@@ -24,11 +24,10 @@ end
 
 ---@param binhash git.oid_binary
 ---@return git.oid
-function oid_type:bin2hex(binhash)
-	assert(#binhash == self.bin_length, 'invalid object id')
+function oid_type.bin2hex(binhash)
 	local buffer = {}
 
-	for i = 1, self.bin_length do
+	for i = 1, #binhash do
 		local byte = string.byte(binhash:sub(i, i))
 		buffer[i] = hex_alphabet[byte]
 	end
@@ -38,11 +37,10 @@ end
 
 ---@param hexhash git.oid
 ---@return git.oid_binary
-function oid_type:hex2bin(hexhash)
-	assert(#hexhash == self.hex_length, 'invalid object id')
+function oid_type.hex2bin(hexhash)
 	local buffer = {}
 
-	for i = 1, self.hex_length, 2 do
+	for i = 1, #hexhash, 2 do
 		local byte = tonumber(hexhash:sub(i, i + 1), 16)
 		buffer[(i + 1) / 2] = string.char(byte)
 	end

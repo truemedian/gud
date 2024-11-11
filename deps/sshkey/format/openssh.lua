@@ -290,9 +290,23 @@ local function load_public_other(data)
 	return key
 end
 
+---Encode an OpenSSH public key from the given key.
+---@param key sshkey.key
+---@return string
+local function save_public_openssh(key, comment)
+	local encoded = key.impl.serialize_public(key)
+	local prefix = key.kt
+	if comment or key.comment then
+		return prefix .. ' ' .. openssl.base64(encoded, true, true) .. ' ' .. (comment or key.comment)
+	else
+		return prefix .. ' ' .. openssl.base64(encoded, true, true)
+	end
+end
+
 return {
 	load_private_openssh = load_private_openssh,
 	load_private_other = load_private_other,
 	load_public_openssh = load_public_openssh,
 	load_public_other = load_public_other,
+	save_public_openssh = save_public_openssh,
 }

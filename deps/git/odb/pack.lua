@@ -10,12 +10,21 @@ local backend_pack_mt = { __index = backend_pack }
 
 ---@param odb git.odb
 ---@param objects_dir string
----@return git.odb.backend.pack|nil, nil|string
+---@return git.odb.backend.pack
 function backend_pack.load(odb, objects_dir)
 	local self = setmetatable({ objects_dir = assert(objects_dir, 'missing objects directory') }, backend_pack_mt)
 
-	self:refresh(odb)
 	return self
+end
+
+function backend_pack:init()
+	if not fs.accessSync(self.objects_dir) then
+		assert(fs.mkdirSync(self.objects_dir))
+	end
+
+	if not fs.accessSync(self.objects_dir .. '/pack') then
+		assert(fs.mkdirSync(self.objects_dir .. '/pack'))
+	end
 end
 
 ---@param odb git.odb
@@ -70,11 +79,9 @@ function backend_pack:refresh(odb)
 	end
 end
 
----@param oid git.oid
----@param data string
----@param kind git.object.kind
+---@param obj git.object
 ---@return boolean, nil|string
-function backend_pack:write(oid, data, kind)
+function backend_pack:write(obj)
 	return false
 end
 
