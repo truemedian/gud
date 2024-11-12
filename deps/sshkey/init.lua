@@ -8,6 +8,9 @@ local openssh = require('sshkey/format/openssh')
 ---@param passphrase string|nil
 ---@return sshkey.key|nil, string|nil
 local function load_private(data, passphrase)
+	assert(type(data) == 'string', 'load_private: data must be a string')
+	assert(passphrase == nil or type(passphrase) == 'string', 'load_private: passphrase must be a string or nil')
+
 	if data:sub(1, 36) == '-----BEGIN OPENSSH PRIVATE KEY-----\n' then
 		local last = data:find('\n-----END OPENSSH PRIVATE KEY-----', 37, true)
 		local encoded = data:sub(37, last - 1)
@@ -23,6 +26,8 @@ end
 ---@param data string
 ---@return sshkey.key|nil, string|nil
 local function load_public(data)
+	assert(type(data) == 'string', 'load_public: data must be a string')
+
 	if data:sub(1, 4) == 'ssh-' or data:sub(1, 6) == 'ecdsa-' then
 		return openssh.load_public_openssh(data)
 	else
@@ -34,6 +39,8 @@ end
 ---@param key sshkey.key
 ---@return string
 local function save_public(key)
+	assert(key.kt and key.pk, 'save_public: not a sshkey')
+
 	return openssh.save_public_openssh(key)
 end
 
@@ -56,7 +63,10 @@ end
 ---@param namespace string
 ---@return string|nil, string|nil
 local function sign(key, data, namespace)
-	assert(key.kt and key.pk, 'fingerprint: not a sshkey')
+	assert(key.kt and key.pk, 'sign: not a sshkey')
+	assert(type(data) == 'string', 'sign: data must be a string')
+	assert(type(namespace) == 'string', 'sign: namespace must be a string')
+
 	if not key.sk then
 		return nil, 'sign: missing private key'
 	end
@@ -92,10 +102,13 @@ end
 ---@param key sshkey.key
 ---@param encoded_signature string
 ---@param data string
----@param expected_namespace string
+---@param namespace string|nil
 ---@return boolean, string|nil
-local function verify(key, encoded_signature, data, expected_namespace)
-	assert(key.kt and key.pk, 'fingerprint: not a sshkey')
+local function verify(key, encoded_signature, data, namespace)
+	assert(key.kt and key.pk, 'verify: not a sshkey')
+	assert(type(encoded_signature) == 'string', 'verify: encoded_signature must be a string')
+	assert(type(data) == 'string', 'verify: data must be a string')
+	assert(namespace == nil or type(namespace) == 'string', 'verify: namespace must be a string')
 
 	local _, encoded_start = encoded_signature:find('-----BEGIN SSH SIGNATURE-----\n', 1, true)
 	local encoded_end = encoded_signature:find('\n-----END SSH SIGNATURE-----', encoded_start, true)
@@ -110,7 +123,7 @@ local function verify(key, encoded_signature, data, expected_namespace)
 	end
 
 	local their_pubkey = signature:read_string()
-	local namespace = signature:read_string()
+	local their_namespace = signature:read_string()
 	local reserved = signature:read_string()
 	local hash_algo = signature:read_string()
 	local signed = signature:read_string()
@@ -140,18 +153,18 @@ local function verify(key, encoded_signature, data, expected_namespace)
 		-- if the keys are the same after deserialization we can continue
 	end
 
-	if expected_namespace == nil then
-		expected_namespace = namespace
+	if namespace == nil then
+		namespace = their_namespace
 	end
 
-	if namespace ~= expected_namespace then -- wrong key or namespace
+	if their_namespace ~= namespace then -- wrong key or namespace
 		return false, 'verify: mismatched namespace'
 	end
 
 	local hashed = openssl.digest.digest(hash_algo, data, true)
 	local blob = buffer.write()
 	blob:write_bytes('SSHSIG')
-	blob:write_string(expected_namespace)
+	blob:write_string(namespace)
 	blob:write_string(reserved)
 	blob:write_string(hash_algo)
 	blob:write_string(hashed)

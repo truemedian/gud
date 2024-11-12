@@ -70,6 +70,21 @@ function refdb_files:write(ref, oid)
 	return true
 end
 
+---@param ref string
+---@return boolean, string|nil
+function refdb_files:delete(ref)
+	assert(ref:sub(1, 5) == 'refs/', 'reference must start with refs/')
+	assert(ref:find('../', 1, true) == nil, 'reference cannot contain extraneous path components')
+
+	local ref_file = self.repository_dir .. '/' .. ref
+	local success, err = fs.unlinkSync(ref_file)
+	if not success then
+		return false, err
+	end
+
+	return true
+end
+
 local function iterate_refs(self, prefix)
 	local function iterate_packed()
 		local packed_refs = common.read_file(self.repository_dir .. '/packed-refs')

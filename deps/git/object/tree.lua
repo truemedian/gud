@@ -137,11 +137,11 @@ function tree:remove_file(name)
 end
 
 ---@param name string
----@return git.object.tree.entry|nil
+---@return git.object|nil
 function tree:get_file(name)
 	for _, entry in ipairs(self.files) do
 		if entry.name == name then
-			return entry
+			return entry.object
 		end
 	end
 end

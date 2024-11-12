@@ -297,7 +297,7 @@ local function save_public_openssh(key, comment)
 	local encoded = key.impl.serialize_public(key)
 	local prefix = key.kt
 	if comment or key.comment then
-		return prefix .. ' ' .. openssl.base64(encoded, true, true) .. ' ' .. (comment or key.comment)
+		return prefix .. ' ' .. openssl.base64(encoded, true, true) .. ' ' .. ((comment or key.comment or ''):match('^%s*(.*)%s*$'))
 	else
 		return prefix .. ' ' .. openssl.base64(encoded, true, true)
 	end

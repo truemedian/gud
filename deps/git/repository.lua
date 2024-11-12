@@ -36,9 +36,7 @@ local default_config = [[
 [core]
   repositoryformatversion = 1
   filemode = true
-  bare = true
-[extensions]
-	refStorage = files]]
+  bare = true]]
 
 function repository:init()
 	if not fs.accessSync(self.repository_dir) then
@@ -123,10 +121,17 @@ end
 function repository:update_reference(ref, obj)
 	local recoded, err = obj:recode(self)
 	if not recoded then
-		return nil, err
+		return false, err
 	end
 
 	return self.refdb:write(ref, obj.oid)
+end
+
+--- Update a reference to an object.
+---@param ref string
+---@return boolean, string|nil
+function repository:remove_reference(ref)
+	return self.refdb:delete(ref)
 end
 
 --- Add an object to the repository. If the object already exists, it will not be added again.
@@ -139,10 +144,54 @@ function repository:store(obj)
 	end
 
 	if self:has(obj.oid) then
+		obj.stored = true
 		return obj.oid
 	end
 
-	return self.odb:write(obj)
+	if obj.kind == 'commit' then
+		if not obj.commit.tree.stored then
+			return nil, 'commit object has unstored tree'
+		end
+
+		for _, parent in ipairs(obj.commit.parents) do
+			if not parent.stored then
+				return nil, 'commit object has unstored parent'
+			end
+		end
+	elseif obj.kind == 'tag' then
+		if not obj.tag.object.stored then
+			return nil, 'tag object has unstored object'
+		end
+	elseif obj.kind == 'tree' then
+		for _, entry in ipairs(obj.tree.files) do
+			if not entry.object.stored then
+				return nil, 'tree object has unstored object'
+			end
+		end
+	end
+
+	local new_oid, write_err = self.odb:write(obj)
+	if not new_oid then
+		return nil, write_err
+	end
+
+	obj.stored = true
+	return new_oid
+end
+
+--- Add multiple objects to the repository.
+---@param ... git.object
+---@return boolean, string|nil
+function repository:store_all(...)
+	for i = 1, select('#', ...) do
+		local obj = select(i, ...)
+		local success, err = self:store(obj)
+		if not success then
+			return false, err
+		end
+	end
+
+	return true
 end
 
 return repository

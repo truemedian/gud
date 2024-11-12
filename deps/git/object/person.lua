@@ -10,9 +10,13 @@ function person.new(name, email, offset)
 	return setmetatable({
 		name = name,
 		email = email,
-		time = 0,
+		time = -1,
 		offset = offset or 0,
 	}, person_mt)
+end
+
+function person.check(obj)
+	return getmetatable(obj) == person_mt
 end
 
 ---@param data any
@@ -50,11 +54,14 @@ function person:encode()
 	local offset_hr = math.floor(self.offset / 60)
 	local offset_min = self.offset % 60
 
-	return string.format('%s <%s> %d %+03d%02d', safe_name, safe_email, self.time, offset_hr, offset_min)
-end
-
-function person:update_time()
-	self.time = os.time()
+	return string.format(
+		'%s <%s> %d %+03d%02d',
+		safe_name,
+		safe_email,
+		self.time == -1 and os.time() or self.time,
+		offset_hr,
+		offset_min
+	)
 end
 
 return person
