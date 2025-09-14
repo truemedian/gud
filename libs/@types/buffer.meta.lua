@@ -15,6 +15,11 @@ function buffer.new(size) end
 ---@return integer
 function buffer:__len() end
 
+--- Set the buffer to the given string, replacing any existing contents.
+---
+---@param str string
+function buffer:set(str) end
+
 --- Reset the buffer to empty while keeping the allocated capacity.
 ---
 function buffer:reset() end

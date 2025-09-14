@@ -18,6 +18,10 @@ if has_lj_buffer then
 		return #self[1]
 	end
 
+	function buffer:set(str)
+		return self[1]:set(str)
+	end
+
 	function buffer:reset()
 		return self[1]:reset()
 	end
@@ -147,6 +151,11 @@ elseif has_ffi then
 		return self[4] - self[3]
 	end
 
+	function buffer:set(str)
+		self:reset()
+		self:write(str)
+	end
+
 	function buffer:reset()
 		self[3] = 0
 		self[4] = 0
@@ -230,6 +239,11 @@ else
 			n = n + #self[i]
 		end
 		return n
+	end
+
+	function buffer:set(str)
+		self:free()
+		self:write(str)
 	end
 
 	function buffer:reset()
