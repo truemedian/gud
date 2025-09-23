@@ -1,322 +1,349 @@
-local has_lj_buffer, lj_buffer = pcall(require, "string.buffer")
 local has_ffi, ffi = pcall(require, "ffi")
 
-local function escape_pattern(str)
-	return (str:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%1"))
-end
+---@type luvit.slice
+local slice = {}
+slice.__index = slice
 
 ---@type luvit.buffer
 local buffer = {}
 buffer.__index = buffer
 
-if has_lj_buffer then
-	function buffer.new(size)
-		return setmetatable({ lj_buffer.new(size) }, buffer)
-	end
-
-	function buffer:__len()
-		return #self[1]
-	end
-
-	function buffer:set(str)
-		return self[1]:set(str)
-	end
-
-	function buffer:reset()
-		return self[1]:reset()
-	end
-
-	function buffer:free()
-		return self[1]:free()
-	end
-
-	function buffer:write(str)
-		if #self[1] == 0 then
-			return self[1]:set(str)
-		end
-
-		return self[1]:put(str)
-	end
-
-	function buffer:read(n)
-		return self[1]:get(n)
-	end
-
-	function buffer:skip(n)
-		return self[1]:skip(n)
-	end
-
-	if has_ffi then
-		ffi.cdef([[
-			void* memchr(const void* ptr, int ch, size_t count);
-			int memcmp(const void* s1, const void* s2, size_t n);
-		]])
-
-		-- avoids issues when statically linked on windows
-		local C = ffi.os == "Windows" and ffi.load("msvcrt") or ffi.C
-
-		function buffer:peek(n, start)
-			local ptr, len = self[1]:ref()
-
-			start = start or 0
-			len = math.min(len, n or len)
-			return ffi.string(ptr + start, math.max(len - start, 0))
-		end
-
-		function buffer:find_first(substr, start)
-			local ptr, len = self[1]:ref()
-			start = start or 0
-
-			local sublen = #substr
-			local chr = substr:byte(1)
-
-			if #substr == 0 then
-				return nil
-			elseif #substr == 1 then
-				local res = C.memchr(ptr + start, chr, len - start)
-				if res == nil then
-					return nil
-				end
-
-				return tonumber(ffi.cast("uintptr_t", res) - ffi.cast("uintptr_t", ptr)) + 1
-			end
-
-			local i = start
-			while i <= len - sublen do
-				local next_match = C.memchr(ptr + i, chr, len - i - sublen + 1)
-				if next_match == nil then
-					return nil
-				end
-
-				i = tonumber(ffi.cast("uintptr_t", next_match) - ffi.cast("uintptr_t", ptr))
-				if C.memcmp(next_match, substr, sublen) == 0 then
-					return i + 1
-				end
-			end
-		end
-
-		function buffer:find_first_of(matches, start)
-			local ptr, len = self[1]:ref()
-			start = start or 0
-
-			for i = start, len - 1 do
-				for j = 1, #matches do
-					if ptr[i] == matches:byte(j) then
-						return i + 1
-					end
-				end
-			end
-		end
+local function clamp(x, min, max)
+	if x < min then
+		return min
+	elseif x > max then
+		return max
 	else
-		function buffer:peek(n, start)
-			local whole = tostring(self[1])
-			start = (start or 0) + 1
-			local stop = n and (start + n - 1) or nil
-			return whole:sub(start, stop)
-		end
-
-		function buffer:find_first(substr, start)
-			local whole = tostring(self[1])
-			start = (start or 0) + 1
-			return whole:find(substr, start, true)
-		end
-
-		function buffer:find_first_of(matches, start)
-			local whole = tostring(self[1])
-			start = (start or 0) + 1
-			return whole:find("[" .. escape_pattern(matches) .. "]", start)
-		end
+		return x
 	end
-elseif has_ffi then
+end
+
+local ref_table = setmetatable({}, { __mode = "k" })
+
+if has_ffi then
+	local COW = 1
+
 	ffi.cdef([[
-	   void free(void *ptr);
-	   void *realloc(void *ptr, size_t size);
-	   void *memmove(void *dest, const void *src, size_t n);
-	]])
+        void free(void *ptr);
+        void *malloc(size_t size);
+        void *realloc(void *ptr, size_t size);
+        void *memmove(void *dest, const void *src, size_t n);
+		
+		void* memchr(const void* ptr, int ch, size_t count);
+		int memcmp(const void* s1, const void* s2, size_t n);
+
+        typedef struct {
+            uint8_t *ptr;
+            uint32_t capacity;
+            uint32_t head;
+            uint32_t tail;
+            uint8_t flags;
+        } luvit_buffer_t;
+		
+        typedef struct {
+            const uint8_t *ptr;
+            uint32_t length;
+        } luvit_slice_t;
+    ]])
+
+	local slice_t = ffi.typeof("luvit_slice_t")
+	ffi.metatype(slice_t, slice)
+
+	local buffer_t = ffi.typeof("luvit_buffer_t")
+	ffi.metatype(buffer_t, buffer)
 
 	-- avoids issues when statically linked on windows
 	local C = ffi.os == "Windows" and ffi.load("msvcrt") or ffi.C
 
-	function buffer.new(size)
-		local ptr = nil
-		if size and size > 0 then
-			ptr = assert(C.malloc(size), "not enough memory")
-			ptr = ffi.gc(ffi.cast("unsigned char*", ptr), C.free)
-		end
+	local function relative_index(len, i)
+		local upper = len - 1
 
-		return setmetatable({ ptr, 0, 0, 0 }, buffer)
+		if i > 0 then
+			return clamp(i - 1, 0, upper)
+		else
+			return clamp(len + i, 0, upper)
+		end
 	end
 
-	function buffer:__len()
-		return self[4] - self[3]
+	local empty_slice = slice_t()
+
+	function slice.new(str)
+		if ffi.istype(slice_t, str) then
+			return str
+		end
+
+		local self = slice_t(ffi.cast("const uint8_t *", str), #str)
+		-- ref_table[self] = str
+		return self
+	end
+
+	function slice:byte(i, j)
+		assert(type(i) == "number", "bad argument #1 to 'byte' (number expected)")
+		assert(type(j) == "number" or j == nil, "bad argument #2 to 'byte' (number or nil expected)")
+
+		i = relative_index(self.length, i)
+		j = relative_index(self.length, j or i)
+
+		if i > j then
+			return nil
+		elseif i == j then
+			return self.ptr[i]
+		end
+
+		return ffi.string(self.ptr + i, j - i + 1):byte(1, j - i + 1)
+	end
+
+	function slice:len()
+		return self.length
+	end
+	slice.__len = slice.len
+
+	function slice:sub(i, j)
+		i = relative_index(self.length, i)
+		j = relative_index(self.length, j or self.length)
+
+		if i > j then
+			return empty_slice
+		end
+
+		local new = slice_t(self.ptr + i, j - i + 1)
+		-- ref_table[new] = self
+		return new
+	end
+
+	function slice:find(substring, init)
+		substring = slice.new(substring)
+
+		local len = self.length
+		init = relative_index(len, init or 1)
+
+		local sublen = substring.length
+		local chr = substring.ptr[0]
+
+		local ptr = self.ptr
+		if sublen == 0 then
+			return nil
+		elseif sublen == 1 then
+			local res = C.memchr(ptr + init, chr, len - init)
+			if res == nil then
+				return nil
+			end
+
+			return tonumber(ffi.cast("uintptr_t", res) - ffi.cast("uintptr_t", ptr)) + 1
+		end
+
+		local i = init
+		while i <= len - sublen do
+			local next_match = C.memchr(ptr + i, chr, len - i - sublen + 1)
+			if next_match == nil then
+				return nil
+			end
+
+			i = tonumber(ffi.cast("uintptr_t", next_match) - ffi.cast("uintptr_t", ptr))
+
+			local match = true
+			for j = i + 1, i + sublen - 1 do
+				if ptr[j] ~= substring.ptr[j - i] then
+					match = false
+					break
+				end
+			end
+
+			if match then
+				return i + 1
+			end
+
+			i = i + 1
+		end
+	end
+
+	function slice:find_any(substring, init)
+		substring = slice.new(substring)
+
+		local len = self.length
+		init = relative_index(len, init or 1)
+
+		local haystack_ptr = self.ptr
+		local needle_len = substring.length
+		local needle_ptr = substring.ptr
+		if needle_len == 0 then
+			return nil
+		end
+
+		for i = init, len - 1 do
+			if C.memchr(needle_ptr, haystack_ptr[i], needle_len) ~= nil then
+				return i + 1
+			end
+		end
+	end
+
+	function slice:equals(other)
+		self = slice.new(self)
+		other = slice.new(other)
+
+		if self.length ~= other.length then
+			return false
+		end
+
+		return C.memcmp(self.ptr, other.ptr, self.length) == 0
+	end
+	slice.__eq = slice.equals
+
+	function slice:tostring()
+		return ffi.string(self.ptr, self.length)
+	end
+	slice.__tostring = slice.tostring
+
+	local initial_size = 64
+	function buffer.new(size)
+		local self = buffer_t()
+		if size and size > 0 then
+			self:resize(size)
+		else
+			self:resize(initial_size)
+		end
+		return self
 	end
 
 	function buffer:set(str)
-		self:reset()
-		self:write(str)
+		self:free()
+
+		ref_table[self] = str
+		self.flags = COW
+
+		if ffi.istype(buffer_t, str) then
+			self.ptr = str.ptr
+			self.capacity = str.capacity
+			self.head = str.head
+			self.tail = str.tail
+		elseif ffi.istype(slice_t, str) then
+			self.ptr = str.ptr
+			self.capacity = str.length
+			self.head = 0
+			self.tail = str.length
+		else
+			local len = #str
+
+			self.ptr = ffi.cast("uint8_t *", str)
+			self.capacity = len
+			self.head = 0
+			self.tail = len
+		end
+
+		return self
+	end
+
+	function buffer:len()
+		return self.tail - self.head
 	end
 
 	function buffer:reset()
-		self[3] = 0
-		self[4] = 0
+		self.head = 0
+		self.tail = 0
 	end
 
 	function buffer:free()
-		C.free(ffi.gc(self[1], nil))
-		self[2] = 0
-		self[3] = 0
-		self[4] = 0
+		if self.flags ~= COW then
+			C.free(self.ptr)
+		end
+
+		self.ptr = nil
+		self.capacity = 0
+		self.head = 0
+		self.tail = 0
+		self.flags = 0
+	end
+
+	function buffer:resize(requested)
+		local cur_len = self.tail - self.head
+		local min_len = cur_len + requested
+		local new_len = min_len + math.floor(min_len / 2) + 32
+
+		if self.flags == COW then
+			ref_table[self] = nil
+			local buf = self.ptr
+
+			self.ptr = assert(C.malloc(new_len), "not enough memory")
+			self.capacity = new_len
+
+			ffi.copy(self.ptr, buf + self.head, cur_len)
+
+			self.tail = cur_len
+			self.head = 0
+			self.flags = 0
+
+			return
+		end
+
+		local cur_capacity = self.capacity
+		local free_space = cur_capacity - self.tail
+		if free_space >= requested then
+			return
+		end
+
+		if self.head ~= 0 then
+			C.memmove(self.ptr, self.ptr + self.head, cur_len)
+
+			self.tail = cur_len
+			self.head = 0
+		end
+
+		local moved_space = cur_capacity - cur_len
+		if moved_space >= requested then
+			return
+		end
+
+		self.ptr = assert(C.realloc(self.ptr, new_len), "not enough memory")
+		self.capacity = new_len
 	end
 
 	function buffer:write(str)
-		local n = #str
+		if ffi.istype(buffer_t, str) then
+			local n = str:len()
+			self:resize(n)
 
-		local c, r, w = self[2], self[3], self[4]
-		local required = w - r + n
+			ffi.copy(self.ptr + self.tail, str.ptr + str.head, n)
+			self.tail = self.tail + n
+		elseif ffi.istype(slice_t, str) then
+			local n = str.length
+			self:resize(n)
 
-		if required >= c then
-			local new_size = math.max(32, c)
-			while required >= new_size do
-				new_size = new_size * 2
-			end
-			local ptr = assert(C.realloc(self[1], new_size), "not enough memory")
+			ffi.copy(self.ptr + self.tail, str.ptr, n)
+			self.tail = self.tail + n
+		else
+			local n = #str
+			self:resize(n)
 
-			if self[1] then
-				ffi.gc(self[1], nil)
-			end
-			self[1] = ffi.gc(ffi.cast("unsigned char*", ptr), C.free)
-			self[2] = new_size
+			ffi.copy(self.ptr + self.tail, str, n)
+			self.tail = self.tail + n
 		end
-
-		if r ~= 0 then
-			local adj = w - r
-
-			C.memmove(self[1], self[1] + r, adj)
-
-			w = adj
-			self[3] = 0
-		end
-
-		ffi.copy(self[1] + w, str, n)
-		self[4] = w + n
 	end
 
 	function buffer:read(n)
 		local str = buffer.peek(self, n)
-		self[3] = self[3] + #str
+		self.head = self.head + #str
 		return str
 	end
 
 	function buffer:skip(n)
 		assert(n >= 0, "invalid forward offset")
-		self[3] = math.min(self[2], self[3] + n)
+		self.head = math.min(self.capacity, self.head + n)
 	end
 
 	function buffer:peek(n, start)
-		start = start or 0
-		n = math.min(n or math.huge, self[2] - self[3])
+		local len = self.tail - self.head
 
-		return ffi.string(self[1] + self[3] + start, n - start)
-	end
+		start = relative_index(len, start or 1)
+		n = clamp(n or (len - start), 0, len - start)
 
-	function buffer:find_first(substr, start)
-		local whole = self:peek(nil, start)
-		return whole:find(substr, 1, true) + (start or 0)
-	end
-
-	function buffer:find_first_of(matches, start)
-		local whole = self:peek(nil, start)
-		return whole:find("[" .. escape_pattern(matches) .. "]", 1) + (start or 0)
-	end
-else
-	function buffer.new(size)
-		return setmetatable({ "" }, buffer)
-	end
-
-	function buffer:__len()
-		local n = 0
-		for i = 1, rawlen(self) do
-			n = n + #self[i]
-		end
-		return n
-	end
-
-	function buffer:set(str)
-		self:free()
-		self:write(str)
-	end
-
-	function buffer:reset()
-		return self:free()
-	end
-
-	function buffer:free()
-		for i = 1, rawlen(self) do
-			self[i] = nil
-		end
-	end
-
-	function buffer:write(str)
-		return table.insert(self, str)
-	end
-
-	function buffer:read(n)
-		local str = self:peek(n)
-		self:skip(n)
-		return str
-	end
-
-	function buffer:skip(n)
-		if not n then
-			return self:reset()
-		end
-
-		for i = 1, rawlen(self) do
-			if n <= #self[i] then
-				self[i] = self[i]:sub(n + 1)
-				return
-			else
-				n = n - #self[i]
-				self[i] = ""
-			end
-		end
-	end
-
-	local function compact(tbl)
-		if rawlen(tbl) > 1 then
-			tbl[1] = table.concat(tbl)
-			for j = 2, rawlen(tbl) do
-				tbl[j] = nil
-			end
-		end
-	end
-
-	function buffer:peek(n, i)
-		compact(self)
-
-		i = i or 0
-		if n then
-			return self[1]:sub(i + 1, n)
-		end
-		if i > 0 then
-			return self[1]:sub(i + 1)
-		end
-		return self[1]
-	end
-
-	function buffer:find_first(substr, start)
-		compact(self)
-
-		start = (start or 0) + 1
-		return self[1]:find(substr, start, true)
-	end
-
-	function buffer:find_first_of(matches, start)
-		compact(self)
-
-		start = (start or 0) + 1
-		return self[1]:find("[" .. escape_pattern(matches) .. "]", start)
+		local new = slice_t(self.ptr + self.head + start, n)
+		-- ref_table[new] = self
+		return new
 	end
 end
 
-return buffer
+return {
+	new = buffer.new,
+	buffer = buffer,
+	slice = slice,
+}
