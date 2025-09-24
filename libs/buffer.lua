@@ -330,19 +330,19 @@ if has_ffi then
 	function buffer:write(str)
 		if getmetatable(str) == buffer then
 			local len = str.tail - str.head
-			self:resize(len)
+			self:grow(len)
 
 			ffi.copy(self.ptr + self.tail, str.ptr + str.head, len)
 			self.tail = self.tail + len
 		elseif getmetatable(str) == slice then
 			local len = str.length
-			self:resize(len)
+			self:grow(len)
 
 			ffi.copy(self.ptr + self.tail, str.ptr, len)
 			self.tail = self.tail + len
 		else
 			local n = #str
-			self:resize(n)
+			self:grow(n)
 
 			ffi.copy(self.ptr + self.tail, str, n)
 			self.tail = self.tail + n
