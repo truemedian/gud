@@ -18,39 +18,41 @@ local function clamp(x, min, max)
 	end
 end
 
-local ref_table = setmetatable({}, { __mode = "k" })
-
 if has_ffi then
-	local COW = 1
+	local ref_table = { [0] = nil }
+
+	local function store_ref(v)
+		local ref = ref_table[0]
+
+		if ref then
+			ref_table[0] = ref_table[ref]
+			ref_table[ref] = v
+			return ref
+		end
+
+		ref = #ref_table + 1
+		ref_table[ref] = v
+		return ref
+	end
+
+	local function free_ref(ref)
+		if not ref then
+			return
+		end
+
+		ref_table[ref] = ref_table[0]
+		ref_table[0] = ref
+	end
 
 	ffi.cdef([[
-        void free(void *ptr);
-        void *malloc(size_t size);
-        void *realloc(void *ptr, size_t size);
-        void *memmove(void *dest, const void *src, size_t n);
-		
+		void free(void *ptr);
+		void *malloc(size_t size);
+		void *realloc(void *ptr, size_t size);
+
+		void *memmove(void *dest, const void *src, size_t n);
 		void* memchr(const void* ptr, int ch, size_t count);
 		int memcmp(const void* s1, const void* s2, size_t n);
-
-        typedef struct {
-            uint8_t *ptr;
-            uint32_t capacity;
-            uint32_t head;
-            uint32_t tail;
-            uint8_t flags;
-        } luvit_buffer_t;
-		
-        typedef struct {
-            const uint8_t *ptr;
-            uint32_t length;
-        } luvit_slice_t;
-    ]])
-
-	local slice_t = ffi.typeof("luvit_slice_t")
-	ffi.metatype(slice_t, slice)
-
-	local buffer_t = ffi.typeof("luvit_buffer_t")
-	ffi.metatype(buffer_t, buffer)
+	]])
 
 	-- avoids issues when statically linked on windows
 	local C = ffi.os == "Windows" and ffi.load("msvcrt") or ffi.C
@@ -65,16 +67,17 @@ if has_ffi then
 		end
 	end
 
-	local empty_slice = slice_t()
-
 	function slice.new(str)
-		if ffi.istype(slice_t, str) then
+		if getmetatable(str) == slice then
 			return str
 		end
 
-		local self = slice_t(ffi.cast("const uint8_t *", str), #str)
-		-- ref_table[self] = str
-		return self
+		local new = setmetatable({
+			ptr = ffi.cast("const uint8_t *", str),
+			length = #str,
+			ref = store_ref(str),
+		}, slice)
+		return new
 	end
 
 	function slice:byte(i, j)
@@ -82,7 +85,7 @@ if has_ffi then
 		assert(type(j) == "number" or j == nil, "bad argument #2 to 'byte' (number or nil expected)")
 
 		i = relative_index(self.length, i)
-		j = relative_index(self.length, j or i)
+		j = j and relative_index(self.length, j) or i
 
 		if i > j then
 			return nil
@@ -90,7 +93,8 @@ if has_ffi then
 			return self.ptr[i]
 		end
 
-		return ffi.string(self.ptr + i, j - i + 1):byte(1, j - i + 1)
+		local len = j - i + 1
+		return ffi.string(self.ptr + i, len):byte(1, len)
 	end
 
 	function slice:len()
@@ -100,27 +104,28 @@ if has_ffi then
 
 	function slice:sub(i, j)
 		i = relative_index(self.length, i)
-		j = relative_index(self.length, j or self.length)
+		j = j and relative_index(self.length, j) or (self.length - 1)
 
-		if i > j then
-			return empty_slice
-		end
-
-		local new = slice_t(self.ptr + i, j - i + 1)
-		-- ref_table[new] = self
+		local new = setmetatable({
+			ptr = self.ptr + i,
+			length = j - i + 1,
+			ref = store_ref(self),
+		}, slice)
 		return new
 	end
 
 	function slice:find(substring, init)
+		local len = self.length
+		local ptr = self.ptr
+
+		init = init and relative_index(len, init) or 0
 		substring = slice.new(substring)
 
-		local len = self.length
-		init = relative_index(len, init or 1)
-
 		local sublen = substring.length
-		local chr = substring.ptr[0]
+		local subptr = substring.ptr
 
-		local ptr = self.ptr
+		local chr = subptr[0]
+
 		if sublen == 0 then
 			return nil
 		elseif sublen == 1 then
@@ -132,28 +137,18 @@ if has_ffi then
 			return tonumber(ffi.cast("uintptr_t", res) - ffi.cast("uintptr_t", ptr)) + 1
 		end
 
-		local i = init
-		while i <= len - sublen do
-			local next_match = C.memchr(ptr + i, chr, len - i - sublen + 1)
+		local pos = init
+		while pos <= len - sublen do
+			local next_match = C.memchr(ptr + pos, chr, len - pos - sublen + 1)
 			if next_match == nil then
 				return nil
 			end
 
-			i = tonumber(ffi.cast("uintptr_t", next_match) - ffi.cast("uintptr_t", ptr))
+			pos = tonumber(ffi.cast("uintptr_t", next_match) - ffi.cast("uintptr_t", ptr)) + 1
 
-			local match = true
-			for j = i + 1, i + sublen - 1 do
-				if ptr[j] ~= substring.ptr[j - i] then
-					match = false
-					break
-				end
+			if C.memcmp(ptr + pos, subptr + 1, sublen - 1) == 0 then
+				return pos
 			end
-
-			if match then
-				return i + 1
-			end
-
-			i = i + 1
 		end
 	end
 
@@ -161,20 +156,24 @@ if has_ffi then
 		substring = slice.new(substring)
 
 		local len = self.length
-		init = relative_index(len, init or 1)
+		local ptr = self.ptr
 
-		local haystack_ptr = self.ptr
+		init = init and relative_index(len, init) or 0
+
 		local needle_len = substring.length
 		local needle_ptr = substring.ptr
 		if needle_len == 0 then
 			return nil
 		end
 
+		local min_found = math.huge
 		for i = init, len - 1 do
-			if C.memchr(needle_ptr, haystack_ptr[i], needle_len) ~= nil then
-				return i + 1
+			if C.memchr(needle_ptr, ptr[i], needle_len) ~= nil then
+				min_found = math.min(min_found, i + 1)
 			end
 		end
+
+		return min_found == math.huge and nil or min_found
 	end
 
 	function slice:equals(other)
@@ -194,33 +193,53 @@ if has_ffi then
 	end
 	slice.__tostring = slice.tostring
 
+	function slice:free()
+		if self.ref then
+			free_ref(self.ref)
+			self.ref = nil
+		end
+
+		self.ptr = nil
+		self.length = 0
+	end
+	slice.__gc = slice.free
+
 	local initial_size = 64
 	function buffer.new(size)
-		local self = buffer_t()
+		local self = setmetatable({
+			ptr = nil,
+			capacity = 0,
+			head = 0,
+			tail = 0,
+			ref = nil,
+		}, buffer)
+
 		if size and size > 0 then
-			self:resize(size)
+			self:grow(size)
 		else
-			self:resize(initial_size)
+			self:grow(initial_size)
 		end
+
 		return self
 	end
 
 	function buffer:set(str)
 		self:free()
 
-		ref_table[self] = str
-		self.flags = COW
+		self.ref = store_ref(str)
 
-		if ffi.istype(buffer_t, str) then
+		if getmetatable(str) == buffer then
 			self.ptr = str.ptr
 			self.capacity = str.capacity
 			self.head = str.head
 			self.tail = str.tail
-		elseif ffi.istype(slice_t, str) then
+		elseif getmetatable(str) == slice then
+			local len = str.length
+
 			self.ptr = str.ptr
-			self.capacity = str.length
+			self.capacity = len
 			self.head = 0
-			self.tail = str.length
+			self.tail = len
 		else
 			local len = #str
 
@@ -243,7 +262,10 @@ if has_ffi then
 	end
 
 	function buffer:free()
-		if self.flags ~= COW then
+		if self.ref then
+			free_ref(self.ref)
+			self.ref = nil
+		else
 			C.free(self.ptr)
 		end
 
@@ -253,24 +275,26 @@ if has_ffi then
 		self.tail = 0
 		self.flags = 0
 	end
+	buffer.__gc = buffer.free
 
-	function buffer:resize(requested)
+	function buffer:grow(requested)
 		local cur_len = self.tail - self.head
 		local min_len = cur_len + requested
 		local new_len = min_len + math.floor(min_len / 2) + 32
 
-		if self.flags == COW then
-			ref_table[self] = nil
+		if self.ref then
+			free_ref(self.ref)
+			self.ref = nil
+
 			local buf = self.ptr
 
-			self.ptr = assert(C.malloc(new_len), "not enough memory")
+			self.ptr = ffi.cast("char *", assert(C.malloc(new_len), "not enough memory"))
 			self.capacity = new_len
 
 			ffi.copy(self.ptr, buf + self.head, cur_len)
 
 			self.tail = cur_len
 			self.head = 0
-			self.flags = 0
 
 			return
 		end
@@ -293,23 +317,29 @@ if has_ffi then
 			return
 		end
 
-		self.ptr = assert(C.realloc(self.ptr, new_len), "not enough memory")
+		if self.ptr == nil then
+			self.ptr = ffi.cast("char *", assert(C.malloc(new_len), "not enough memory"))
+			self.capacity = new_len
+			return
+		end
+
+		self.ptr = ffi.cast("char *", assert(C.realloc(self.ptr, new_len), "not enough memory"))
 		self.capacity = new_len
 	end
 
 	function buffer:write(str)
-		if ffi.istype(buffer_t, str) then
-			local n = str:len()
-			self:resize(n)
+		if getmetatable(str) == buffer then
+			local len = str.tail - str.head
+			self:resize(len)
 
-			ffi.copy(self.ptr + self.tail, str.ptr + str.head, n)
-			self.tail = self.tail + n
-		elseif ffi.istype(slice_t, str) then
-			local n = str.length
-			self:resize(n)
+			ffi.copy(self.ptr + self.tail, str.ptr + str.head, len)
+			self.tail = self.tail + len
+		elseif getmetatable(str) == slice then
+			local len = str.length
+			self:resize(len)
 
-			ffi.copy(self.ptr + self.tail, str.ptr, n)
-			self.tail = self.tail + n
+			ffi.copy(self.ptr + self.tail, str.ptr, len)
+			self.tail = self.tail + len
 		else
 			local n = #str
 			self:resize(n)
@@ -317,6 +347,20 @@ if has_ffi then
 			ffi.copy(self.ptr + self.tail, str, n)
 			self.tail = self.tail + n
 		end
+	end
+
+	function buffer:peek(n, start)
+		local len = self.tail - self.head
+
+		start = start and relative_index(len, start) or 0
+		n = n and clamp(n, 0, len - start) or (len - start)
+
+		local new = setmetatable({
+			ptr = self.ptr + self.head + start,
+			length = n,
+			ref = store_ref(self),
+		}, slice)
+		return new
 	end
 
 	function buffer:read(n)
@@ -328,17 +372,6 @@ if has_ffi then
 	function buffer:skip(n)
 		assert(n >= 0, "invalid forward offset")
 		self.head = math.min(self.capacity, self.head + n)
-	end
-
-	function buffer:peek(n, start)
-		local len = self.tail - self.head
-
-		start = relative_index(len, start or 1)
-		n = clamp(n or (len - start), 0, len - start)
-
-		local new = slice_t(self.ptr + self.head + start, n)
-		-- ref_table[new] = self
-		return new
 	end
 end
 

@@ -14,7 +14,7 @@ local function test_ffi(chunks)
 			return a:tostring()
 		end
 
-		j = str:len() - 3
+		j = #str - 3
 	end
 end
 
@@ -77,28 +77,34 @@ local function test_tbl(chunks)
 end
 
 print("bytes,ffi(s),ffi(b/s),tbl(s),tbl(b/s)")
-for j = 1, 10 do
+for j = 1, 1 do
 	local chunks = {}
 
 	math.randomseed(12345 * j)
-	for i = 1, j * 200000 do
-		table.insert(chunks, string.rep("a", math.random(1, 100)) .. (math.random(1, 10) == 10 and "" or "\r\n"))
+	for i = 1, j * 20000 do
+		local part = {}
+
+		for k = 1, math.random(1, 20) do
+			table.insert(part, string.rep("a", math.random(1, 100)) .. "\r\n")
+		end
+
+		table.insert(chunks, table.concat(part))
 	end
 
 	table.insert(chunks, "final chunk\r\n\r\nHrrr")
 
+	-- local start = os.clock()
+	-- local resultA = test_ffi(chunks)
+	-- local timeA = os.clock() - start
+
 	local start = os.clock()
-	local resultA = test_ffi(chunks)
-	local timeA = os.clock() - start
+	local resultB = test_naive(chunks)
+	local timeB = os.clock() - start
 
 	-- local start = os.clock()
-	-- local resultB = test_naive(chunks)
-	-- local timeB = os.clock() - start
-
-	local start = os.clock()
-	local resultC = test_tbl(chunks)
-	local timeC = os.clock() - start
+	-- local resultC = test_tbl(chunks)
+	-- local timeC = os.clock() - start
 
 	local bytes = #table.concat(chunks)
-	print(bytes .. "," .. timeA .. "," .. bytes / timeA .. "," .. timeC .. "," .. bytes / timeC)
+	print(bytes .. "," .. timeB .. "," .. bytes / timeB)
 end

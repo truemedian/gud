@@ -66,6 +66,12 @@ slice.__eq = slice.equals
 function slice.tostring(self) end
 slice.__tostring = slice.tostring
 
+--- Release all references to the underlying data.
+---
+---@param self luvit.slice
+function slice.free(self) end
+slice.__gc = slice.free
+
 ---@class luvit.buffer
 local buffer = {}
 buffer.__index = buffer
@@ -79,7 +85,8 @@ function buffer.new(size) end
 --- Get the length of the buffer in bytes.
 ---
 ---@return integer
-function buffer:__len() end
+function buffer:len() end
+buffer.__len = buffer.len
 
 --- Set the buffer to the given string, replacing any existing contents.
 ---
@@ -93,6 +100,12 @@ function buffer:reset() end
 --- Reset the buffer to empty and free any allocated memory.
 ---
 function buffer:free() end
+buffer.__gc = buffer.free
+
+--- Grow the buffer so that at least `n` additional bytes can be written without further allocations.
+---
+---@param n integer
+function buffer:grow(n) end
 
 --- Append `str` to the buffer.
 ---@param str string|luvit.slice|luvit.buffer
