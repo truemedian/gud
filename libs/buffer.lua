@@ -1,20 +1,38 @@
 local has_ffi, ffi = pcall(require, "ffi")
 
----@type luvit.slice
 local slice = {}
 slice.__index = slice
 
----@type luvit.buffer
 local buffer = {}
 buffer.__index = buffer
 
-local function clamp(x, min, max)
-	if x < min then
-		return min
-	elseif x > max then
-		return max
-	else
-		return x
+-- translate relative index to absolute index.
+-- positive values count from the start, negative values count from the end.
+-- clamped to [1, inf)
+local function relative_start(len, i)
+	if i > 0 then
+		return i
+	elseif i == 0 then
+		return 1
+	elseif i >= -len then
+		return len + i + 1
+	else -- i < -len
+		return 1
+	end
+end
+
+-- translate relative end to absolute end.
+-- positive values count from the start, negative values count from the end.
+-- clamped to [0, len]
+local function relative_end(len, j)
+	if j > len then
+		return len
+	elseif j >= 0 then
+		return j
+	elseif j >= -len then
+		return len + j + 1
+	else -- j < -len
+		return 0
 	end
 end
 
@@ -57,44 +75,33 @@ if has_ffi then
 	-- avoids issues when statically linked on windows
 	local C = ffi.os == "Windows" and ffi.load("msvcrt") or ffi.C
 
-	local function relative_index(len, i)
-		local upper = len - 1
-
-		if i > 0 then
-			return clamp(i - 1, 0, upper)
-		else
-			return clamp(len + i, 0, upper)
-		end
-	end
-
 	function slice.new(str)
 		if getmetatable(str) == slice then
 			return str
 		end
 
-		local new = setmetatable({
+		return setmetatable({
 			ptr = ffi.cast("const uint8_t *", str),
 			length = #str,
 			ref = store_ref(str),
 		}, slice)
-		return new
 	end
 
 	function slice:byte(i, j)
 		assert(type(i) == "number", "bad argument #1 to 'byte' (number expected)")
 		assert(type(j) == "number" or j == nil, "bad argument #2 to 'byte' (number or nil expected)")
 
-		i = relative_index(self.length, i)
-		j = j and relative_index(self.length, j) or i
+		i = relative_start(self.length, i)
+		j = j and relative_end(self.length, j) or i
 
 		if i > j then
-			return nil
+			return
 		elseif i == j then
 			return self.ptr[i]
 		end
 
 		local len = j - i + 1
-		return ffi.string(self.ptr + i, len):byte(1, len)
+		return ffi.string(self.ptr + i - 1, len):byte(1, len)
 	end
 
 	function slice:len()
@@ -103,22 +110,25 @@ if has_ffi then
 	slice.__len = slice.len
 
 	function slice:sub(i, j)
-		i = relative_index(self.length, i)
-		j = j and relative_index(self.length, j) or (self.length - 1)
+		i = relative_start(self.length, i)
+		j = j and relative_end(self.length, j) or self.length
 
-		local new = setmetatable({
-			ptr = self.ptr + i,
+		if i > j then
+			return slice.empty
+		end
+
+		return setmetatable({
+			ptr = self.ptr + i - 1,
 			length = j - i + 1,
 			ref = store_ref(self),
 		}, slice)
-		return new
 	end
 
 	function slice:find(substring, init)
 		local len = self.length
 		local ptr = self.ptr
 
-		init = init and relative_index(len, init) or 0
+		init = init and relative_start(len, init) or 1
 		substring = slice.new(substring)
 
 		local sublen = substring.length
@@ -126,10 +136,11 @@ if has_ffi then
 
 		local chr = subptr[0]
 
-		if sublen == 0 then
+		local pos = init - 1
+		if sublen == 0 or pos >= len then
 			return nil
 		elseif sublen == 1 then
-			local res = C.memchr(ptr + init, chr, len - init)
+			local res = C.memchr(ptr + pos, chr, len - pos)
 			if res == nil then
 				return nil
 			end
@@ -137,7 +148,6 @@ if has_ffi then
 			return tonumber(ffi.cast("uintptr_t", res) - ffi.cast("uintptr_t", ptr)) + 1
 		end
 
-		local pos = init
 		while pos <= len - sublen do
 			local next_match = C.memchr(ptr + pos, chr, len - pos - sublen + 1)
 			if next_match == nil then
@@ -158,7 +168,7 @@ if has_ffi then
 		local len = self.length
 		local ptr = self.ptr
 
-		init = init and relative_index(len, init) or 0
+		init = init and relative_start(len, init) or 1
 
 		local needle_len = substring.length
 		local needle_ptr = substring.ptr
@@ -167,7 +177,7 @@ if has_ffi then
 		end
 
 		local min_found = math.huge
-		for i = init, len - 1 do
+		for i = init - 1, len - 1 do
 			if C.memchr(needle_ptr, ptr[i], needle_len) ~= nil then
 				min_found = math.min(min_found, i + 1)
 			end
@@ -352,15 +362,14 @@ if has_ffi then
 	function buffer:peek(n, start)
 		local len = self.tail - self.head
 
-		start = start and relative_index(len, start) or 0
-		n = n and clamp(n, 0, len - start) or (len - start)
+		start = start and relative_start(len, start) or 1
+		n = n and math.min(len - start, n) or len - start
 
-		local new = setmetatable({
-			ptr = self.ptr + self.head + start,
+		return setmetatable({
+			ptr = self.ptr + self.head + start - 1,
 			length = n,
 			ref = store_ref(self),
 		}, slice)
-		return new
 	end
 
 	function buffer:read(n)
@@ -373,7 +382,13 @@ if has_ffi then
 		assert(n >= 0, "invalid forward offset")
 		self.head = math.min(self.capacity, self.head + n)
 	end
+else
 end
+
+slice.empty = slice.new("")
+
+---@cast slice luvit.slice
+---@cast buffer luvit.buffer
 
 return {
 	new = buffer.new,
