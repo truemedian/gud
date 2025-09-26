@@ -1,6 +1,7 @@
 ---@meta
 
 ---@class luvit.slice
+---@field empty luvit.slice
 local slice = {}
 slice.__index = slice
 
@@ -73,6 +74,7 @@ function slice.free(self) end
 slice.__gc = slice.free
 
 ---@class luvit.buffer
+---@field slice luvit.slice
 local buffer = {}
 buffer.__index = buffer
 

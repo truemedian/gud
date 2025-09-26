@@ -1,15 +1,6 @@
 local luv = require("luv")
-
-local function make_wait()
-	local thread = coroutine.running()
-
-	return function(...)
-		local success, err = coroutine.resume(thread, ...)
-		if not success then
-			error(debug.traceback(thread, err))
-		end
-	end
-end
+local buffer = require("buffer")
+local miniz = require("miniz")
 
 local sink = {}
 
@@ -30,31 +21,39 @@ end
 
 --- Write items to the sink.
 ---
----@param ... string
----@return boolean success, string|nil err
-function sink.null:write(...)
-	return true
+---@param items luvit.stream.sink.iovec
+---@param callback luvit.stream.sink.success
+function sink.null:writev(items, callback)
+	return callback(true)
+end
+
+--- Write an item to the sink.
+---
+---@param item luvit.stream.sink.item
+---@param callback luvit.stream.sink.success
+function sink.null:write(item, callback)
+	return callback(true)
 end
 
 --- Indicate that the sink should attempt to push any buffered items to the underlying resource.
 ---
----@return boolean success, string|nil err
-function sink.null:flush()
-	return true
+---@param callback luvit.stream.sink.success
+function sink.null:flush(callback)
+	return callback(true)
 end
 
 --- End the sink, no more items will be written.
 ---
----@return boolean success, string|nil err
-function sink.null:finish()
-	return true
+---@param callback luvit.stream.sink.success
+function sink.null:finish(callback)
+	return callback(true)
 end
 
 -- #endregion
 -- #region sink.counting
 
 ---@class luvit.stream.sink.counting : luvit.stream.sink
----@field count integer The number of items written to the sink.
+---@field count integer
 ---
 --- A sink that counts the number of items written to it. Does not store the items.
 sink.counting = {}
@@ -69,38 +68,47 @@ end
 
 --- Write items to the sink.
 ---
----@param ... string
----@return boolean success, string|nil err
-function sink.counting:write(...)
+---@param items luvit.stream.sink.iovec
+---@param callback luvit.stream.sink.success
+function sink.counting:writev(items, callback)
 	local size = 0
-	for i = 1, select("#", ...) do
-		local v = select(i, ...)
+
+	for _, v in ipairs(items) do
 		size = size + #v
 	end
 
 	self.count = self.count + size
-	return true
+	return callback(true)
+end
+
+--- Write an item to the sink.
+---
+---@param item luvit.stream.sink.item
+---@param callback luvit.stream.sink.success
+function sink.counting:write(item, callback)
+	self.count = self.count + #item
+	return callback(true)
 end
 
 --- Indicate that the sink should attempt to push any buffered items to the underlying resource.
 ---
----@return boolean success, string|nil err
-function sink.counting:flush()
-	return true
+---@param callback luvit.stream.sink.success
+function sink.counting:flush(callback)
+	return callback(true)
 end
 
 --- End the sink, no more items will be written.
 ---
----@return boolean success, string|nil err
-function sink.counting:finish()
-	return true
+---@param callback luvit.stream.sink.success
+function sink.counting:finish(callback)
+	return callback(true)
 end
 
 -- #endregion
 -- #region sink.table
 
 ---@class luvit.stream.sink.table : luvit.stream.sink
----@field items any[] The table to write items to.
+---@field items string[]
 ---
 --- A sink that writes items to a table.
 sink.table = {}
@@ -108,7 +116,7 @@ sink.table.__index = sink.table
 
 --- Create a new table sink.
 ---
----@param items any[]? The table to write items to. If not provided, a new table will be created.
+---@param items string[]? The table to write items to. If not provided, a new table will be created.
 ---@return luvit.stream.sink.table
 function sink.table.new(items)
 	items = items or {}
@@ -117,40 +125,48 @@ end
 
 --- Write items to the sink.
 ---
----@param ... string
----@return boolean success, string|nil err
-function sink.table:write(...)
-	local count = select("#", ...)
-
+---@param items luvit.stream.sink.iovec
+---@param callback luvit.stream.sink.success
+function sink.table:writev(items, callback)
 	local n = self.n
-	for i = 1, count do
-		local v = select(i, ...)
-		self.items[n + i] = v
+
+	for i, v in ipairs(items) do
+		self.items[n + i] = tostring(v)
 	end
 
-	self.n = n + count
-	return true
+	self.n = n + #items
+	return callback(true)
+end
+
+--- Write an item to the sink.
+---
+---@param item luvit.stream.sink.item
+---@param callback luvit.stream.sink.success
+function sink.table:write(item, callback)
+	self.n = self.n + 1
+	self.items[self.n] = tostring(item)
+	return callback(true)
 end
 
 --- Indicate that the sink should attempt to push any buffered items to the underlying resource.
 ---
----@return boolean success, string|nil err
-function sink.table:flush()
-	return true
+---@param callback luvit.stream.sink.success
+function sink.table:flush(callback)
+	return callback(true)
 end
 
 --- End the sink, no more items will be written.
 ---
----@return boolean success, string|nil err
-function sink.table:finish()
-	return true
+---@param callback luvit.stream.sink.success
+function sink.table:finish(callback)
+	return callback(true)
 end
 
 -- #endregion
 -- #region sink.uv_file
 
 ---@class luvit.stream.sink.uv_file : luvit.stream.sink
----@field fd integer The file descriptor to write to.
+---@field fd integer
 ---
 --- A sink that writes items to a file descriptor using libuv.
 sink.uv_file = {}
@@ -169,82 +185,106 @@ end
 
 --- Write items to the sink.
 ---
----@param ... string
----@return boolean success, string|nil err
-function sink.uv_file:write(...)
-	local n_buffers = select("#", ...)
-
-	---@type string|string[]
-	local buffers = ...
-	if n_buffers == 1 then
-		buffers = { ... }
+---@param items luvit.stream.sink.iovec
+---@param callback luvit.stream.sink.success
+function sink.uv_file:writev(items, callback)
+	-- any slices need to be converted to strings
+	for i, v in ipairs(items) do
+		items[i] = tostring(v)
 	end
 
-	while true do
-		local req, err = luv.uv_fs_write(self.fd, buffers, -1, make_wait())
-		if not req then
-			return false, err
-		end
-
-		local n_written
-		err, n_written = coroutine.yield()
+	local req, err = luv.uv_fs_write(self.fd, items, -1, function(err, n_written)
 		if err then
-			return false, err
+			return callback(false, err)
 		end
 
-		if n_buffers == 1 then
-			if n_written < #buffers then
-				buffers = buffers:sub(n_written + 1)
+		-- figure out what remains to be written
+		local new_start, old_end = 0, #items
+		for i = 1, old_end do
+			local item = items[i]
+			if n_written >= #item then
+				n_written = n_written - #item
 			else
-				return true
-			end
-		end
-
-		while n_buffers > 0 do
-			if n_written < #buffers[1] then
-				buffers[1] = buffers[1]:sub(n_written + 1)
+				new_start = i
 				break
-			else
-				n_written = n_written - #buffers[1]
-				table.remove(buffers, 1)
-				n_buffers = n_buffers - 1
 			end
+
+			items[i] = nil
 		end
 
-		if n_buffers == 0 then
-			return true
-		elseif n_buffers == 1 then
-			buffers = buffers[1]
+		-- all items were written
+		if new_start == 0 then
+			return callback(true)
 		end
+
+		-- shift remaining items to the front of the array
+		for i = new_start, old_end do
+			items[i - new_start + 1] = items[i]
+			items[i] = nil
+		end
+
+		-- if there's a partial write, adjust the first items
+		if n_written > 0 then
+			items[1] = items[1]:sub(n_written + 1)
+		end
+
+		-- write remaining items
+		return self:writev(items, callback)
+	end)
+
+	if not req then
+		return callback(false, err)
+	end
+end
+
+--- Write an item to the sink.
+---
+---@param item luvit.stream.sink.item
+---@param callback luvit.stream.sink.success
+function sink.uv_file:write(item, callback)
+	local req, err = luv.uv_fs_write(self.fd, tostring(item), -1, function(err, n_written)
+		if err then
+			return callback(false, err)
+		end
+
+		local remaining = item:sub(n_written + 1)
+		if #remaining > 0 then
+			return self:write(remaining, callback)
+		end
+
+		return callback(true)
+	end)
+
+	if not req then
+		return callback(false, err)
 	end
 end
 
 --- Indicate that the sink should attempt to push any buffered items to the underlying resource.
 ---
----@return boolean success, string|nil err
-function sink.uv_file:flush()
-	local req, err = luv.uv_fs_fdatasync(self.fd, make_wait())
-	if not req then
-		return false, err
-	end
+---@param callback luvit.stream.sink.success
+function sink.uv_file:flush(callback)
+	local req, err = luv.uv_fs_fdatasync(self.fd, function(err, success)
+		return callback(success, err)
+	end)
 
-	local success
-	err, success = coroutine.yield()
-	return success, err
+	if not req then
+		return callback(false, err)
+	end
 end
 
 --- End the sink, no more items will be written.
 ---
----@return boolean success, string|nil err
-function sink.uv_file:finish()
-	return self:flush()
+---@param callback luvit.stream.sink.success
+function sink.uv_file:finish(callback)
+	return self:flush(callback)
 end
 
 -- #endregion
 -- #region sink.uv_stream
 
 ---@class luvit.stream.sink.uv_stream : luvit.stream.sink
----@field fd integer The file descriptor to write to.
+---@field stream uv_stream_t
 ---
 --- A sink that writes items to a file descriptor using libuv.
 sink.uv_stream = {}
@@ -260,44 +300,368 @@ end
 
 --- Write items to the sink.
 ---
----@param ... string
----@return boolean success, string|nil err
-function sink.uv_stream:write(...)
-	local n_buffers = select("#", ...)
-
-	---@type string|string[]
-	local buffers = ...
-	if n_buffers == 1 then
-		buffers = { ... }
+---@param items luvit.stream.sink.iovec
+---@param callback luvit.stream.sink.success
+function sink.uv_stream:writev(items, callback)
+	-- any slices need to be converted to strings
+	for i, v in ipairs(items) do
+		items[i] = tostring(v)
 	end
 
-	local req, err = luv.uv_write(self.fd, buffers, make_wait())
+	local req, err = luv.uv_write(self.stream, items, function(err)
+		return callback(not err, err)
+	end)
+
 	if not req then
-		return false, err
+		return callback(false, err)
 	end
+end
 
-	err = coroutine.yield()
-	return not err, err
+--- Write an item to the sink.
+---
+---@param item luvit.stream.sink.item
+---@param callback luvit.stream.sink.success
+function sink.uv_stream:write(item, callback)
+	local req, err = luv.uv_write(self.stream, tostring(item), function(err)
+		return callback(not err, err)
+	end)
+
+	if not req then
+		return callback(false, err)
+	end
 end
 
 --- Indicate that the sink should attempt to push any buffered items to the underlying resource.
 ---
----@return boolean success, string|nil err
-function sink.uv_stream:flush()
-	return true
+---@param callback luvit.stream.sink.success
+function sink.uv_stream:flush(callback)
+	return callback(true)
 end
 
 --- End the sink, no more items will be written.
 ---
----@return boolean success, string|nil err
-function sink.uv_stream:finish()
-	local req, err = luv.uv_shutdown(self.fd, make_wait())
+---@param callback luvit.stream.sink.success
+function sink.uv_stream:finish(callback)
+	local req, err = luv.uv_shutdown(self.fd, function(err)
+		return callback(not err, err)
+	end)
+
 	if not req then
-		return false, err
+		return callback(false, err)
+	end
+end
+
+-- #endregion
+-- #region sink.synchronize
+
+---@class luvit.stream.sink.sync
+---@field sink luvit.stream.sink
+---
+--- A sink that synchronizes another sink
+sink.sync = {}
+sink.sync.__index = sink.sync
+
+--- Create a new synchronized sink.
+---
+---@param sink luvit.stream.sink The sink to synchronize.
+---@return luvit.stream.sink.sync
+function sink.sync.new(sink)
+	return setmetatable({ sink = sink }, sink.sync)
+end
+
+--- Write items to the sink.
+---
+---@param items luvit.stream.sink.iovec
+function sink.sync:writev(items)
+	local co = coroutine.running()
+	local success, err
+	local yielded = false
+
+	self.sink:writev(items, function(s, e)
+		if yielded then
+			return coroutine.resume(co, s, e)
+		else
+			success = s
+			err = e
+			yielded = true
+		end
+	end)
+
+	if yielded then
+		return success, err
 	end
 
-	err = coroutine.yield()
-	return not err, err
+	yielded = true
+	return coroutine.yield()
+end
+
+--- Write an item to the sink.
+---
+---@param item luvit.stream.sink.item
+function sink.sync:write(item)
+	local co = coroutine.running()
+	local success, err
+	local yielded = false
+
+	self.sink:write(item, function(s, e)
+		if yielded then
+			return coroutine.resume(co, s, e)
+		else
+			success = s
+			err = e
+			yielded = true
+		end
+	end)
+
+	if yielded then
+		return success, err
+	end
+
+	yielded = true
+	return coroutine.yield()
+end
+
+--- Indicate that the sink should attempt to push any buffered items to the underlying resource.
+---
+---@return boolean, string|nil
+function sink.sync:flush()
+	local co = coroutine.running()
+	local success, err
+	local yielded = false
+
+	self.sink:flush(function(s, e)
+		if yielded then
+			return coroutine.resume(co, s, e)
+		else
+			success = s
+			err = e
+			yielded = true
+		end
+	end)
+
+	if yielded then
+		return success, err
+	end
+
+	yielded = true
+	return coroutine.yield()
+end
+
+--- End the sink, no more items will be written.
+---
+---@return boolean, string|nil
+function sink.sync:finish()
+	local co = coroutine.running()
+	local success, err
+	local yielded = false
+
+	self.sink:finish(function(s, e)
+		if yielded then
+			return coroutine.resume(co, s, e)
+		else
+			success = s
+			err = e
+			yielded = true
+		end
+	end)
+
+	if yielded then
+		return success, err
+	end
+
+	yielded = true
+	return coroutine.yield()
+end
+
+-- #endregion
+-- #region sink.buffered
+
+---@class luvit.stream.sink.buffered : luvit.stream.sink
+---@field under luvit.stream.sink
+---@field buffer luvit.buffer
+---@field high_water_mark integer
+---
+--- A sink that buffers items before writing them to another sink.
+sink.buffered = {}
+sink.buffered.__index = sink.buffered
+
+--- Create a new buffered sink.
+---
+---@param under luvit.stream.sink The underlying sink.
+---@param high_water_mark integer The maximum number of bytes to buffer before flushing.
+---@return luvit.stream.sink.buffered
+function sink.buffered.new(under, high_water_mark)
+	return setmetatable({
+		under = under,
+		buffer = buffer.new(),
+		high_water_mark = high_water_mark or 4096,
+	}, sink.buffered)
+end
+
+--- Write items to the sink.
+---
+---@param items luvit.stream.sink.iovec
+---@param callback luvit.stream.sink.success
+function sink.buffered:writev(items, callback)
+	local len = #self.buffer
+	for _, v in ipairs(items) do
+		len = len + #v
+	end
+
+	if len >= self.high_water_mark then
+		return self:flush(function(success, err)
+			if not success then
+				return callback(false, err)
+			end
+
+			return self.under:writev(items, callback)
+		end)
+	end
+
+	for _, v in ipairs(items) do
+		self.buffer:write(v)
+	end
+
+	return callback(true)
+end
+
+--- Write an item to the sink.
+---
+---@param item luvit.stream.sink.item
+---@param callback luvit.stream.sink.success
+function sink.buffered:write(item, callback)
+	local len = #self.buffer + #item
+	if len >= self.high_water_mark then
+		return self:flush(function(success, err)
+			if not success then
+				return callback(false, err)
+			end
+
+			return self.under:write(item, callback)
+		end)
+	end
+
+	self.buffer:write(item)
+	return callback(true)
+end
+
+--- Indicate that the sink should attempt to push any buffered items to the underlying resource.
+---
+---@param callback luvit.stream.sink.success
+function sink.buffered:flush(callback)
+	if #self.buffer == 0 then
+		return callback(true)
+	end
+
+	return self.under:write(self.buffer:read(), callback)
+end
+
+--- End the sink, no more items will be written.
+---
+---@param callback luvit.stream.sink.success
+function sink.buffered:finish(callback)
+	if #self.buffer == 0 then
+		self.buffer:free()
+		return callback(true)
+	end
+
+	return self.under:write(self.buffer:read(), function(success, err)
+		self.buffer:free()
+		return callback(success, err)
+	end)
+end
+
+-- #endregion
+-- #region sink.deflate
+
+---@class luvit.stream.sink.deflate : luvit.stream.sink
+---@field under luvit.stream.sink
+---@field deflator userdata
+---
+--- A sink that compresses items before writing them to another sink.
+sink.deflate = {}
+sink.deflate.__index = sink.deflate
+
+--- Create a new deflating sink.
+---
+---@param under luvit.stream.sink The underlying sink.
+function sink.deflate.new(under)
+	local deflator = miniz.new_deflator()
+	return setmetatable({ under = under, deflator = deflator }, sink.deflate)
+end
+
+--- Write items to the sink.
+---
+---@param items luvit.stream.sink.iovec
+---@param callback luvit.stream.sink.success
+function sink.deflate:writev(items, callback)
+	local out = {}
+
+	for _, v in ipairs(items) do
+		local chunk, err = self.deflator:deflate(v)
+		if not chunk then
+			return callback(false, err)
+		end
+
+		if #chunk > 0 then
+			table.insert(out, chunk)
+		end
+	end
+
+	if #out == 0 then
+		return callback(true)
+	end
+
+	return self.under:writev(out, callback)
+end
+
+--- Write an item to the sink.
+---
+---@param item luvit.stream.sink.item
+---@param callback luvit.stream.sink.success
+function sink.deflate:write(item, callback)
+	local chunk, err = self.deflator:deflate(item)
+	if not chunk then
+		return callback(false, err)
+	end
+
+	if #chunk == 0 then
+		return callback(true)
+	end
+
+	return self.under:write(chunk, callback)
+end
+
+--- Indicate that the sink should attempt to push any buffered items to the underlying resource.
+---
+---@param callback luvit.stream.sink.success
+function sink.deflate:flush(callback)
+	local chunk, err = self.deflator:deflate("", "sync")
+	if not chunk then
+		return callback(false, err)
+	end
+
+	if #chunk == 0 then
+		return callback(true)
+	end
+
+	return self.under:write(chunk, callback)
+end
+
+--- End the sink, no more items will be written.
+---
+---@param callback luvit.stream.sink.success
+function sink.deflate:finish(callback)
+	local chunk, err = self.deflator:deflate("", "finish")
+	if not chunk then
+		return callback(false, err)
+	end
+
+	if #chunk == 0 then
+		return callback(true)
+	end
+
+	return self.under:write(chunk, callback)
 end
 
 -- #endregion
