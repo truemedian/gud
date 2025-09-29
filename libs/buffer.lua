@@ -265,6 +265,7 @@ if has_ffi then
 	function buffer:len()
 		return self.tail - self.head
 	end
+	buffer.__len = buffer.len
 
 	function buffer:reset()
 		self.head = 0
@@ -363,7 +364,7 @@ if has_ffi then
 		local len = self.tail - self.head
 
 		start = start and relative_start(len, start) or 1
-		n = n and math.min(len - start, n) or len - start
+		n = n and math.min(len - start + 1, n) or (len - start + 1)
 
 		return setmetatable({
 			ptr = self.ptr + self.head + start - 1,
@@ -383,15 +384,183 @@ if has_ffi then
 		self.head = math.min(self.capacity, self.head + n)
 	end
 else
+	function slice.new(str) end
+
+	function slice:byte(i, j) end
+
+	function slice:len()
+		return self.length
+	end
+	slice.__len = slice.len
+
+	function slice:sub(i, j) end
+
+	function slice:find(substring, init) end
+
+	function slice:find_any(substring, init) end
+
+	function slice:equals(other) end
+	slice.__eq = slice.equals
+
+	function slice:tostring() end
+	slice.__tostring = slice.tostring
+
+	function slice:free() end
+
+	function buffer.new(size)
+		return setmetatable({
+			ptr = { nil, nil, nil, nil, nil, nil, nil, nil },
+			-- index of the head in the `ptr` array
+			head_outer = 1,
+			-- index of the head in the `ptr[head_outer]` string
+			head_inner = 1,
+			-- the number of bytes available from `ptr[head_outer]` starting at `head_inner` to the end of the string
+			length = 1,
+			-- if this buffer needs to copy on write
+			ref = false,
+		}, buffer)
+	end
+
+	function buffer:set(str)
+		self:free()
+
+		if getmetatable(str) == buffer then
+			self.ptr = str.ptr
+			self.head_outer = str.head_outer
+			self.head_inner = str.head_inner
+			self.length = str.length
+			self.ref = true
+		elseif getmetatable(str) == slice then
+			self.ptr = str.ptr
+			self.head_outer = str.start_outer
+			self.head_inner = str.start_inner
+			self.length = str.length
+			self.ref = true
+		else
+			self.ptr[1] = str
+			self.head_outer = 1
+			self.head_inner = 1
+			self.length = #str
+			self.ref = false
+		end
+	end
+
+	function buffer:len()
+		return self.length
+	end
+	buffer.__len = buffer.len
+
+	function buffer:reset()
+		self.head_outer = 1
+		self.head_inner = 1
+		self.length = 0
+	end
+
+	function buffer:free()
+		self.ptr = { nil, nil, nil, nil, nil, nil, nil, nil }
+
+		self.head_outer = 1
+		self.head_inner = 1
+		self.length = 0
+		self.ref = false
+	end
+
+	function buffer:grow(requested)
+		if self.ref then
+			local new_ptr = {}
+
+			new_ptr[1] = self.ptr[self.head_outer]:sub(self.head_inner)
+			for i = self.head_outer + 1, #self.ptr do
+				new_ptr[i - self.head_outer + 1] = self.ptr[i]
+			end
+
+			self.head_outer = 1
+			self.head_inner = 1
+			self.ptr = new_ptr
+			self.ref = false
+		end
+	end
+
+	function buffer:write(str)
+		if getmetatable(str) == buffer then
+			self:grow(0)
+
+			local i = #self.ptr + 1
+			local n = str.length
+
+			self.ptr[i] = str.ptr[str.head_outer]:sub(str.head_inner, str.head_inner + n - 1)
+			n = n - #self.ptr[i]
+
+			for j = str.head_outer + 1, #str.ptr do
+				i = i + 1
+				self.ptr[i] = str.ptr[j]:sub(1, n)
+				n = n - #str.ptr[j]
+
+				if n <= 0 then
+					break
+				end
+			end
+
+			self.length = self.length + str.length
+		elseif getmetatable(str) == slice then
+			self:grow(0)
+
+			local i = #self.ptr + 1
+			local n = str.length
+
+			self.ptr[i] = str.ptr[str.start_outer]:sub(str.start_inner, str.start_inner + n - 1)
+			n = n - #self.ptr[i]
+
+			for j = str.start_outer + 1, #str.ptr do
+				i = i + 1
+				self.ptr[i] = str.ptr[j]:sub(1, n)
+				n = n - #str.ptr[j]
+
+				if n <= 0 then
+					break
+				end
+			end
+
+			self.length = self.length + str.length
+		else
+			self:grow(0)
+
+			self.ptr[#self.ptr + 1] = str
+			self.length = self.length + #str
+		end
+	end
+
+	function buffer:peek(n, start) end
+
+	function buffer:read(n)
+		local str = buffer.peek(self, n)
+		self:skip(n)
+		return str
+	end
+
+	function buffer:skip(n)
+		assert(n >= 0, "invalid forward offset")
+
+		while n > 0 and self.length > 0 do
+			local available = #self.ptr[self.head_outer] - self.head_inner + 1
+			if n < available then
+				self.head_inner = self.head_inner + n
+				self.length = self.length - n
+				n = 0
+			else
+				n = n - available
+				self.length = self.length - available
+				self.head_outer = self.head_outer + 1
+				self.head_inner = 1
+			end
+		end
+	end
 end
 
 slice.empty = slice.new("")
+buffer.slice = slice
 
 ---@cast slice luvit.slice
 ---@cast buffer luvit.buffer
 
-return {
-	new = buffer.new,
-	buffer = buffer,
-	slice = slice,
-}
+return buffer
