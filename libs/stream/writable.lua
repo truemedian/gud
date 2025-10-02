@@ -8,6 +8,8 @@ local function assertResume(thread, ...)
 	end
 end
 
+-- #region writable
+
 ---@class luvit.stream.writable
 ---@field protected error string|nil
 ---@field protected write_buffer luvit.buffer
@@ -88,6 +90,13 @@ function writable:uncork()
 	return true
 end
 
+--- Shut down the writable stream. Any further writes are disallowed. The stream should be flushed before shutting down.
+---@return boolean
+---@return string|nil
+function writable:shutdown()
+	return true
+end
+
 --- Finish writing. This will flush any remaining data in the write buffer.
 ---@return boolean
 ---@return string|nil
@@ -100,9 +109,10 @@ function writable:finish()
 		return self:flush("")
 	end
 
-	return true
+	return self:shutdown()
 end
 
+-- #endregion
 -- #region writable.string
 
 ---@class luvit.stream.writable.string: luvit.stream.writable
@@ -137,6 +147,75 @@ function writable.string:out()
 end
 
 -- #endregion
+-- #region writable.file
+
+---@class luvit.stream.writable.file : luvit.stream.writable
+---@field private fd integer
+---@field private position integer
+---
+--- A writable stream that writes to a file descriptor.
+writable.file = {}
+writable.file.__index = writable.file
+
+for k, v in pairs(writable) do
+	writable.file[k] = v
+end
+
+--- Create a new writable stream for the given file descriptor.
+---
+---@param fd integer
+---@return luvit.stream.writable.file stream
+function writable.file.new(fd)
+	return setmetatable({
+		fd = fd,
+		position = 0,
+		write_buffer = buffer.new(),
+		high_water_mark = 4 * 1024,
+		corked = false,
+	}, writable.file)
+end
+
+--- Open a file and return a writable stream for it.
+---
+---@param path string
+---@param flags? string
+---@param mode? integer
+---@return luvit.stream.writable.file|nil stream
+---@return string|nil error
+function writable.file.open(path, flags, mode)
+	local fd, err = luv.fs_open(path, flags or "r", mode or 438)
+	if not fd then
+		return nil, err
+	end
+
+	return (writable.file.new(fd))
+end
+
+function writable.file:drain(extra)
+	local thread = coroutine.running()
+	local yielded, nwritten = false, nil
+
+	luv.fs_write(self.fd, { self.write_buffer:peek():tostring(), extra }, function(err, count)
+		nwritten = count or 0
+
+		if err then
+			self.error = err
+		end
+
+		if yielded then
+			assertResume(thread, nwritten)
+		end
+	end)
+
+	if nwritten then
+		return nwritten
+	end
+
+	yielded = true
+	return coroutine.yield()
+end
+
+-- #endregion
 -- #region writable.stream
 
 ---@class luvit.stream.writable.stream : luvit.stream.writable
@@ -163,7 +242,7 @@ end
 function writable.stream:drain(extra)
 	local thread = coroutine.running()
 
-	luv.uv_write(self.stream, { self.write_buffer:read():tostring(), extra }, function(err)
+	luv.write(self.stream, { self.write_buffer:read():tostring(), extra }, function(err)
 		if err then
 			self.error = err
 			return assertResume(thread, 0)
@@ -175,27 +254,15 @@ function writable.stream:drain(extra)
 	return coroutine.yield()
 end
 
-function writable.stream:finish()
-	if self.error then
-		return false, self.error
-	end
-
-	if #self.write_buffer > 0 then
-		local success, err = self:flush("")
-		if not success then
-			return false, err
-		end
-	end
-
+function writable.stream:shutdown()
 	local thread = coroutine.running()
 
-	luv.uv_shutdown(self.stream, function(err)
+	luv.shutdown(self.stream, function(err)
 		if err then
 			self.error = err
-			return assertResume(thread, false, err)
 		end
 
-		return assertResume(thread, true)
+		return assertResume(thread, not err, err)
 	end)
 
 	return coroutine.yield()
@@ -244,18 +311,7 @@ function writable.filter:drain(extra)
 	return #self.write_buffer
 end
 
-function writable.filter:finish()
-	if self.error then
-		return false, self.error
-	end
-
-	if #self.write_buffer > 0 then
-		local success, err = self:flush("")
-		if not success then
-			return false, err
-		end
-	end
-
+function writable.filter:shutdown()
 	local filtered, filt_err = self.filter(nil)
 	if not filtered then
 		self.error = filt_err
