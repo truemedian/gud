@@ -224,7 +224,9 @@ if has_ffi then
 			ref = nil,
 		}, buffer)
 
-		if size and size > 0 then
+		if type(size) ~= "number" and size then
+			self:set(size)
+		elseif size and size > initial_size then
 			self:grow(size)
 		else
 			self:grow(initial_size)

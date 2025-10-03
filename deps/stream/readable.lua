@@ -1,9 +1,9 @@
 local luv = require("luv")
-local buffer = require("buffer")
+local buffer = import("buffer")
 
 local function assertResume(thread, ...)
-	local success, err = coroutine.resume(thread, ...)
-	if not success then
+	local ok, err = coroutine.resume(thread, ...)
+	if not ok then
 		error(debug.traceback(thread, err), 0)
 	end
 end
@@ -16,12 +16,21 @@ end
 ---@field protected read_buffer luvit.buffer
 local readable = {}
 
---- Request for the stream to fill its internal buffer with at least `count` more bytes. The number of new bytes
---- available in the internal buffer after the fill operation is returned. If the stream has reached the end, the
---- returned value may be less than `count`.
+--- Initialize the readable stream.
 ---
----@param count integer
----@return integer count of new bytes available in the internal buffer
+---@protected
+function readable:init(str)
+	self.error = nil
+	self.ended = false
+	self.read_buffer = buffer.new(str)
+end
+
+--- Request for the stream to fill its internal buffer with at least `count` more bytes.
+---
+---@protected
+---@param count integer a hint of how many bytes the caller would like to have available
+---@return integer count number of new bytes available in the internal buffer
+---@nodiscard
 function readable:fill(count)
 	return 0
 end
@@ -29,10 +38,14 @@ end
 --- Peek at the contents of the internal buffer without consuming any data.
 ---
 ---@return luvit.slice
+---@nodiscard
 function readable:peek()
 	return self.read_buffer:peek()
 end
 
+--- Fills the internal buffer with at least `count` more bytes, unless the stream ends or an error occurs.
+---
+---@param count integer
 function readable:fillAtLeast(count)
 	if self.ended or self.error then
 		return
@@ -50,6 +63,7 @@ end
 ---@param bytes integer
 ---@return string|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readExact(bytes)
 	local available = #self.read_buffer
 
@@ -73,6 +87,7 @@ end
 ---@param bytes integer
 ---@return string|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readAtLeast(bytes)
 	local available = #self.read_buffer
 	if available < bytes then
@@ -95,6 +110,7 @@ end
 ---@param bytes integer
 ---@return string|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readAtMost(bytes)
 	local available = #self.read_buffer
 
@@ -120,6 +136,7 @@ end
 ---@param chunk_size? integer
 ---@return boolean success
 ---@return string|nil error
+---@nodiscard
 function readable:pump(writable, finish, chunk_size)
 	chunk_size = chunk_size or (16 * 1024)
 
@@ -131,9 +148,10 @@ function readable:pump(writable, finish, chunk_size)
 			break
 		end
 
-		local ok, write_err = writable:write(chunk)
+		local ok
+		ok, err = writable:write(chunk)
 		if not ok then
-			return false, write_err
+			return false, err
 		end
 	end
 
@@ -152,8 +170,9 @@ end
 ---
 ---@param max_size? number
 ---@param include_delimiter? boolean
----@return string|nil data
+---@return luvit.slice|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readLine(max_size, include_delimiter)
 	max_size = max_size or math.huge
 
@@ -168,16 +187,15 @@ function readable:readLine(max_size, include_delimiter)
 			end
 
 			if include_delimiter then
-				return self.read_buffer:read(idx):tostring()
+				return self.read_buffer:read(idx)
 			else
 				local data = self.read_buffer:peek(idx - 1)
-				if data:byte(-1) == 10 then
+				if data:byte(-1) == 13 then
 					data = data:sub(1, -2)
 				end
 
-				local result = data:tostring()
 				self.read_buffer:skip(idx)
-				return result
+				return data
 			end
 		end
 
@@ -198,8 +216,9 @@ end
 ---@param delimiter string
 ---@param max_size? number
 ---@param include_delimiter? boolean
----@return string|nil data
+---@return luvit.slice|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readUntil(delimiter, max_size, include_delimiter)
 	max_size = max_size or math.huge
 
@@ -214,11 +233,10 @@ function readable:readUntil(delimiter, max_size, include_delimiter)
 			end
 
 			if include_delimiter then
-				return self.read_buffer:read(idx + #delimiter - 1):tostring()
+				return self.read_buffer:read(idx + #delimiter - 1)
 			else
-				local result = self.read_buffer:read(idx - 1):tostring()
 				self.read_buffer:skip(#delimiter)
-				return result
+				return self.read_buffer:read(idx - 1)
 			end
 		end
 
@@ -241,6 +259,7 @@ end
 ---
 ---@return integer|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readUInt8()
 	local data, err = self:readExact(1)
 	if not data then
@@ -255,6 +274,7 @@ end
 ---
 ---@return integer|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readInt8()
 	local data, err = self:readUInt8()
 	if not data then
@@ -268,6 +288,7 @@ end
 ---
 ---@return integer|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readUInt16LE()
 	local data, err = self:readExact(2)
 	if not data then
@@ -282,6 +303,7 @@ end
 ---
 ---@return integer|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readUInt16BE()
 	local data, err = self:readExact(2)
 	if not data then
@@ -296,6 +318,7 @@ end
 ---
 ---@return integer|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readInt16LE()
 	local data, err = self:readUInt16LE()
 	if not data then
@@ -309,6 +332,7 @@ end
 ---
 ---@return integer|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readInt16BE()
 	local data, err = self:readUInt16BE()
 	if not data then
@@ -322,6 +346,7 @@ end
 ---
 ---@return integer|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readUInt32LE()
 	local data, err = self:readExact(4)
 	if not data then
@@ -336,6 +361,7 @@ end
 ---
 ---@return integer|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readUInt32BE()
 	local data, err = self:readExact(4)
 	if not data then
@@ -350,6 +376,7 @@ end
 ---
 ---@return integer|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readInt32LE()
 	local data, err = self:readUInt32LE()
 	if not data then
@@ -363,6 +390,7 @@ end
 ---
 ---@return integer|nil data
 ---@return string|nil error
+---@nodiscard
 function readable:readInt32BE()
 	local data, err = self:readUInt32BE()
 	if not data then
@@ -387,9 +415,11 @@ end
 ---
 ---@param str string
 ---@return luvit.stream.readable.string stream
+---@nodiscard
 function readable.string.new(str)
-	local self = setmetatable({ read_buffer = buffer.new(), ended = true }, readable.string)
-	self.read_buffer:set(str)
+	local self = setmetatable({}, readable.string)
+    self:init(str)
+	self.ended = true
 	return self
 end
 
@@ -412,8 +442,11 @@ end
 ---
 ---@param fd integer
 ---@return luvit.stream.readable.file stream
+---@nodiscard
 function readable.file.new(fd)
-	return setmetatable({ fd = fd, position = 0, read_buffer = buffer.new(), ended = false }, readable.file)
+	local self = setmetatable({ fd = fd, position = 0 }, readable.file)
+	self:init()
+	return self
 end
 
 --- Open a file and return a readable stream for it.
@@ -423,6 +456,7 @@ end
 ---@param mode? integer
 ---@return luvit.stream.readable.file|nil stream
 ---@return string|nil error
+---@nodiscard
 function readable.file.open(path, flags, mode)
 	local fd, err = luv.fs_open(path, flags or "r", mode or 438)
 	if not fd then
@@ -432,6 +466,12 @@ function readable.file.open(path, flags, mode)
 	return (readable.file.new(fd))
 end
 
+--- Request for the stream to fill its internal buffer with at least `count` more bytes.
+---
+---@protected
+---@param count integer a hint of how many bytes the caller would like to have available
+---@return integer count number of new bytes available in the internal buffer
+---@nodiscard
 function readable.file:fill(count)
 	local thread = coroutine.running()
 	local yielded, nread = false, nil
@@ -484,10 +524,19 @@ end
 ---
 ---@param stream userdata
 ---@return luvit.stream.readable.stream stream
+---@nodiscard
 function readable.stream.new(stream)
-	return setmetatable({ stream = stream, read_buffer = buffer.new(), ended = false }, readable.stream)
+	local self = setmetatable({ stream = stream }, readable.stream)
+	self:init()
+	return self
 end
 
+--- Request for the stream to fill its internal buffer with at least `count` more bytes.
+---
+---@protected
+---@param count integer a hint of how many bytes the caller would like to have available
+---@return integer count number of new bytes available in the internal buffer
+---@nodiscard
 function readable.stream:fill(count)
 	local thread = coroutine.running()
 	local nread = 0
@@ -527,15 +576,24 @@ for k, v in pairs(readable) do
 	readable.filter[k] = v
 end
 
+--- Create a new readable stream that filters data from the given source stream.
+---
+---@param source luvit.stream.readable
+---@param filter fun(data: string|nil): data: string|nil, err: string|nil
+---@return luvit.stream.readable.filter stream
+---@nodiscard
 function readable.filter.new(source, filter)
-	return setmetatable({
-		source = source,
-		filter = filter,
-		read_buffer = buffer.new(),
-		ended = false,
-	}, readable.filter)
+	local self = setmetatable({ source = source, filter = filter }, readable.filter)
+	self:init()
+	return self
 end
 
+--- Request for the stream to fill its internal buffer with at least `count` more bytes.
+---
+---@protected
+---@param count integer a hint of how many bytes the caller would like to have available
+---@return integer count number of new bytes available in the internal buffer
+---@nodiscard
 function readable.filter:fill(count)
 	local chunk, read_err = self.source:readAtMost(4 * 1024)
 	if read_err then
@@ -552,6 +610,62 @@ function readable.filter:fill(count)
 	if filtered then
 		self.read_buffer:write(filtered)
 		return #filtered
+	else
+		self.ended = true
+		return 0
+	end
+end
+
+-- #endregion
+-- #region readable.limited
+
+---@class luvit.stream.readable.limited : luvit.stream.readable
+---@field private remaining integer
+---@field private source luvit.stream.readable
+---
+--- A readable stream that reads from another readable stream and limits the amount of data read.
+readable.limited = {}
+readable.limited.__index = readable.limited
+
+for k, v in pairs(readable) do
+	readable.limited[k] = v
+end
+
+--- Create a new readable stream that limits data from the given source stream.
+---
+---@param source luvit.stream.readable
+---@param limit integer
+---@return luvit.stream.readable.limited stream
+---@nodiscard
+function readable.limited.new(source, limit)
+	local self = setmetatable({ source = source, remaining = limit }, readable.limited)
+	self:init()
+	return self
+end
+
+--- Request for the stream to fill its internal buffer with at least `count` more bytes.
+---
+---@protected
+---@param count integer a hint of how many bytes the caller would like to have available
+---@return integer count number of new bytes available in the internal buffer
+---@nodiscard
+function readable.limited:fill(count)
+	local chunk, err = self.source:readAtMost(self.remaining)
+	if err then
+		self.error = err
+		return 0
+	end
+
+	if chunk then
+		local n = #chunk
+		self.remaining = self.remaining - n
+		self.read_buffer:write(chunk)
+
+		if self.remaining <= 0 then
+			self.ended = true
+		end
+
+		return n
 	else
 		self.ended = true
 		return 0

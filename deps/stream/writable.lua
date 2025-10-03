@@ -1,9 +1,9 @@
 local luv = require("luv")
-local buffer = require("buffer")
+local buffer = import("buffer")
 
 local function assertResume(thread, ...)
-	local success, err = coroutine.resume(thread, ...)
-	if not success then
+	local ok, err = coroutine.resume(thread, ...)
+	if not ok then
 		error(debug.traceback(thread, err), 0)
 	end
 end
@@ -17,6 +17,22 @@ end
 ---@field protected corked boolean
 local writable = {}
 
+--- Initialize the writable stream.
+---
+---@protected
+function writable:init()
+	self.write_buffer = buffer.new()
+	self.high_water_mark = 4 * 1024
+	self.corked = false
+end
+
+--- Write as much data as possible from the write buffer and the optional extra data to the underlying stream.
+---
+---@protected
+---@param extra string additional data to write after the buffered data
+---@return integer number of bytes written from the write buffer and extra data
+---@return string|nil error if an error occurred during writing
+---@nodiscard
 function writable:drain(extra)
 	return #self.write_buffer + #extra
 end
@@ -27,6 +43,7 @@ end
 ---@param extra? string
 ---@return boolean
 ---@return string|nil
+---@nodiscard
 function writable:flush(extra)
 	if self.error then
 		return false, self.error
@@ -59,6 +76,7 @@ end
 ---@param data string
 ---@return boolean
 ---@return string|nil
+---@nodiscard
 function writable:write(data)
 	if self.error then
 		return false, self.error
@@ -80,6 +98,7 @@ end
 --- Uncork the stream. This will flush the write buffer if it exceeds the high water mark.
 ---@return boolean
 ---@return string|nil
+---@nodiscard
 function writable:uncork()
 	self.corked = false
 
@@ -90,26 +109,20 @@ function writable:uncork()
 	return true
 end
 
---- Shut down the writable stream. Any further writes are disallowed. The stream should be flushed before shutting down.
----@return boolean
----@return string|nil
-function writable:shutdown()
-	return true
-end
-
 --- Finish writing. This will flush any remaining data in the write buffer.
 ---@return boolean
 ---@return string|nil
+---@nodiscard
 function writable:finish()
 	if self.error then
 		return false, self.error
 	end
 
 	if #self.write_buffer > 0 then
-		return self:flush("")
+		return self:flush()
 	end
 
-	return self:shutdown()
+	return true
 end
 
 -- #endregion
@@ -122,26 +135,37 @@ end
 writable.string = {}
 writable.string.__index = writable.string
 
-function writable.string.new()
-	local self = setmetatable({
-		out_buffer = buffer.new(),
-		write_buffer = buffer.new(),
-		high_water_mark = 4 * 1024,
-		corked = false,
-	}, writable.string)
-	return self
-end
-
 for k, v in pairs(writable) do
 	writable.string[k] = v
 end
 
+--- Create a new writable string stream.
+---
+---@return luvit.stream.writable.string stream
+---@nodiscard
+function writable.string.new()
+	local self = setmetatable({ out_buffer = buffer.new() }, writable.string)
+	self:init()
+	return self
+end
+
+--- Write as much data as possible from the write buffer and the optional extra data to the underlying stream.
+---
+---@protected
+---@param extra string additional data to write after the buffered data
+---@return integer number of bytes written from the write buffer and extra data
+---@return string|nil error if an error occurred during writing
+---@nodiscard
 function writable.string:drain(extra)
 	self.out_buffer:write(self.write_buffer:read())
 	self.out_buffer:write(extra)
 	return #self.write_buffer + #extra
 end
 
+--- Get the contents of the string buffer and clear it.
+---
+---@return string
+---@nodiscard
 function writable.string:out()
 	return self.out_buffer:read():tostring()
 end
@@ -165,14 +189,11 @@ end
 ---
 ---@param fd integer
 ---@return luvit.stream.writable.file stream
+---@nodiscard
 function writable.file.new(fd)
-	return setmetatable({
-		fd = fd,
-		position = 0,
-		write_buffer = buffer.new(),
-		high_water_mark = 4 * 1024,
-		corked = false,
-	}, writable.file)
+	local self = setmetatable({ fd = fd, position = 0 }, writable.file)
+	self:init()
+	return self
 end
 
 --- Open a file and return a writable stream for it.
@@ -182,6 +203,7 @@ end
 ---@param mode? integer
 ---@return luvit.stream.writable.file|nil stream
 ---@return string|nil error
+---@nodiscard
 function writable.file.open(path, flags, mode)
 	local fd, err = luv.fs_open(path, flags or "r", mode or 438)
 	if not fd then
@@ -191,8 +213,24 @@ function writable.file.open(path, flags, mode)
 	return (writable.file.new(fd))
 end
 
+--- Write as much data as possible from the write buffer and the optional extra data to the underlying stream.
+---
+---@protected
+---@param extra string additional data to write after the buffered data
+---@return integer number of bytes written from the write buffer and extra data
+---@return string|nil error if an error occurred during writing
+---@nodiscard
 function writable.file:drain(extra)
-	local thread = coroutine.running()
+	local thread, main = coroutine.running()
+	if main then
+		local nwritten, err = luv.fs_write(self.fd, { self.write_buffer:peek():tostring(), extra })
+		if err then
+			self.error = err
+			return 0
+		end
+		return nwritten
+	end
+
 	local yielded, nwritten = false, nil
 
 	luv.fs_write(self.fd, { self.write_buffer:peek():tostring(), extra }, function(err, count)
@@ -225,22 +263,38 @@ end
 writable.stream = {}
 writable.stream.__index = writable.stream
 
-function writable.stream.new(stream)
-	local self = setmetatable({
-		stream = stream,
-		write_buffer = buffer.new(),
-		high_water_mark = 4 * 1024,
-		corked = false,
-	}, writable.stream)
-	return self
-end
-
 for k, v in pairs(writable) do
 	writable.stream[k] = v
 end
 
+--- Create a new writable stream for the given libuv stream.
+---
+---@param stream userdata a libuv stream
+---@return luvit.stream.writable.stream
+---@nodiscard
+function writable.stream.new(stream)
+	local self = setmetatable({ stream = stream }, writable.stream)
+	self:init()
+	return self
+end
+
+--- Write as much data as possible from the write buffer and the optional extra data to the underlying stream.
+---
+---@protected
+---@param extra string additional data to write after the buffered data
+---@return integer number of bytes written from the write buffer and extra data
+---@return string|nil error if an error occurred during writing
+---@nodiscard
 function writable.stream:drain(extra)
-	local thread = coroutine.running()
+	local thread, main = coroutine.running()
+	if main then
+		local ok, err = luv.write(self.stream, { self.write_buffer:read():tostring(), extra })
+		if not ok then
+			self.error = err
+			return 0
+		end
+		return #self.write_buffer + #extra
+	end
 
 	luv.write(self.stream, { self.write_buffer:read():tostring(), extra }, function(err)
 		if err then
@@ -254,7 +308,22 @@ function writable.stream:drain(extra)
 	return coroutine.yield()
 end
 
-function writable.stream:shutdown()
+--- Finish writing. This will flush any remaining data in the write buffer.
+---@return boolean
+---@return string|nil
+---@nodiscard
+function writable.stream:finish()
+	if self.error then
+		return false, self.error
+	end
+
+	if #self.write_buffer > 0 then
+		local ok, err = self:flush()
+		if not ok then
+			return false, err
+		end
+	end
+
 	local thread = coroutine.running()
 
 	luv.shutdown(self.stream, function(err)
@@ -279,20 +348,29 @@ end
 writable.filter = {}
 writable.filter.__index = writable.filter
 
-function writable.filter.new(dest, filter)
-	return setmetatable({
-		dest = dest,
-		filter = filter,
-		write_buffer = buffer.new(),
-		high_water_mark = 4 * 1024,
-		corked = false,
-	}, writable.filter)
-end
-
 for k, v in pairs(writable) do
 	writable.filter[k] = v
 end
 
+--- Create a new writable filter stream.
+---
+---@param dest luvit.stream.writable the destination writable stream
+---@param filter fun(data: string|nil): data: string|nil, err: string|nil the filter function to apply to the data
+---@return luvit.stream.writable.filter
+---@nodiscard
+function writable.filter.new(dest, filter)
+	local self = setmetatable({ dest = dest, filter = filter }, writable.filter)
+	self:init()
+	return self
+end
+
+--- Write as much data as possible from the write buffer and the optional extra data to the underlying stream.
+---
+---@protected
+---@param extra string additional data to write after the buffered data
+---@return integer number of bytes written from the write buffer and extra data
+---@return string|nil error if an error occurred during writing
+---@nodiscard
 function writable.filter:drain(extra)
 	local buffered = self.write_buffer:read():tostring()
 
@@ -302,8 +380,8 @@ function writable.filter:drain(extra)
 		return 0
 	end
 
-	local success, err = self.dest:write(filtered)
-	if not success then
+	local ok, err = self.dest:write(filtered)
+	if not ok then
 		self.error = err
 		return 0
 	end
@@ -311,15 +389,30 @@ function writable.filter:drain(extra)
 	return #self.write_buffer
 end
 
-function writable.filter:shutdown()
+--- Finish writing. This will flush any remaining data in the write buffer.
+---@return boolean
+---@return string|nil
+---@nodiscard
+function writable.filter:finish()
+	if self.error then
+		return false, self.error
+	end
+
+	if #self.write_buffer > 0 then
+		local ok, err = self:flush()
+		if not ok then
+			return false, err
+		end
+	end
+
 	local filtered, filt_err = self.filter(nil)
 	if not filtered then
 		self.error = filt_err
 		return not self.error, self.error
 	end
 
-	local success, err = self.dest:write(filtered)
-	if not success then
+	local ok, err = self.dest:write(filtered)
+	if not ok then
 		self.error = err
 		return false, err
 	end
