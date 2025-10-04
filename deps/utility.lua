@@ -58,7 +58,7 @@ function utility.find_line(source, line)
 		sources[name] = content
 	end
 
-	local stream = readable.string.new(content)
+	local stream = readable.string(content)
 	while line > 1 do
 		local chunk = stream:readLine()
 		if not chunk then

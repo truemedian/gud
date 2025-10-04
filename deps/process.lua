@@ -58,44 +58,44 @@ if uname.sysname == "Windows_NT" or uname.sysname:sub(1, 10) == "MINGW32_NT" the
 end
 
 if luv.guess_handle(0) == "file" then
-	process.stdin = readable.file.new(0)
+	process.stdin = readable.file(0)
 	process.stdin.is_tty = false
 elseif luv.guess_handle(0) == "tty" then
 	local stream = luv.new_tty(0, true)
-	process.stdin = readable.stream.new(stream)
+	process.stdin = readable.stream(stream)
 	process.stdin.is_tty = true
 else
 	local stream = luv.new_pipe(false)
 	luv.pipe_open(stream, 0)
-	process.stdin = readable.stream.new(stream)
+	process.stdin = readable.stream(stream)
 	process.stdin.is_tty = false
 end
 
 if luv.guess_handle(1) == "file" then
-	process.stdout = writable.file.new(1)
+	process.stdout = writable.file(1)
 	process.stdout.is_tty = false
 elseif luv.guess_handle(1) == "tty" then
 	local stream = luv.new_tty(1, false)
-	process.stdout = writable.stream.new(stream)
+	process.stdout = writable.stream(stream)
 	process.stdout.is_tty = true
 else
 	local stream = luv.new_pipe(false)
 	luv.pipe_open(stream, 1)
-	process.stdout = writable.stream.new(stream)
+	process.stdout = writable.stream(stream)
 	process.stdout.is_tty = false
 end
 
 if luv.guess_handle(2) == "file" then
-	process.stderr = writable.file.new(2)
+	process.stderr = writable.file(2)
 	process.stderr.is_tty = false
 elseif luv.guess_handle(2) == "tty" then
 	local stream = luv.new_tty(2, false)
-	process.stderr = writable.stream.new(stream)
+	process.stderr = writable.stream(stream)
 	process.stderr.is_tty = true
 else
 	local stream = luv.new_pipe(false)
 	luv.pipe_open(stream, 2)
-	process.stderr = writable.stream.new(stream)
+	process.stderr = writable.stream(stream)
 	process.stderr.is_tty = false
 end
 
