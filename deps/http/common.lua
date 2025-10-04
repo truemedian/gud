@@ -106,7 +106,72 @@ local function parseResponse(readable)
 	return parseHeaders(readable, context)
 end
 
+local headers_meta = {}
+function headers_meta:__index(key)
+	if headers_meta[key] then
+		return headers_meta[key]
+	end
+
+	key = key:lower()
+
+	for _, header in ipairs(self) do
+		if header.name == key then
+			return header.value
+		end
+	end
+
+	return nil
+end
+
+function headers_meta:__newindex(key, value)
+	if value == nil then
+		self:remove(key)
+	else
+		self:set(key, value)
+	end
+end
+
+function headers_meta:find(key)
+	key = key:lower()
+
+	for i, header in ipairs(self) do
+		if header.name == key then
+			return i
+		end
+	end
+
+	return nil
+end
+
+function headers_meta:set(key, value)
+	key = key:lower()
+
+	local idx = self:find(key)
+	if idx then
+		self[idx].value = value
+	else
+		self[#self + 1] = { name = key, value = value }
+	end
+end
+
+function headers_meta:add(key, value)
+	key = key:lower()
+
+	self[#self + 1] = { name = key, value = value }
+end
+
+function headers_meta:remove(key)
+	key = key:lower()
+
+	for i = #self, 1, -1 do
+		if self[i].name == key then
+			table.remove(self, i)
+		end
+	end
+end
+
 return {
 	parseRequest = parseRequest,
 	parseResponse = parseResponse,
+	headers_meta = headers_meta,
 }

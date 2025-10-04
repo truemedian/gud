@@ -1,12 +1,40 @@
 local uv = require("uv")
 local buffer = import("buffer")
 
----@alias fd_t integer
----@alias uv_fs_t userdata
+---@class fd_t : integer
+---@class uv_fs_t : userdata
 
----@alias std.fs.stat_info { dev: integer, mode: integer, nlink: integer, uid: integer, gid: integer, rdev: integer, ino: integer, size: integer, blksize: integer, blocks: integer, flags: integer, gen: integer, atime: { sec: integer, nsec: integer }, mtime: { sec: integer, nsec: integer }, ctime: { sec: integer, nsec: integer }, birthtime: { sec: integer, nsec: integer }, type: string }
+---@class std.fs.timeval
+---@field sec integer
+---@field nsec integer
 
----@alias std.fs.statfs_info { type: integer, bsize: integer, blocks: integer, bfree: integer, bavail: integer, files: integer, ffree: integer }
+---@class std.fs.stat_info
+---@field dev integer
+---@field mode integer
+---@field nlink integer
+---@field uid integer
+---@field gid integer
+---@field rdev integer
+---@field ino integer
+---@field size integer
+---@field blksize integer
+---@field blocks integer
+---@field flags integer
+---@field gen integer
+---@field atime std.fs.timeval
+---@field mtime std.fs.timeval
+---@field ctime std.fs.timeval
+---@field birthtime std.fs.timeval
+---@field type string
+
+---@class std.fs.statfs_info
+---@field type integer
+---@field bsize integer
+---@field blocks integer
+---@field bfree integer
+---@field bavail integer
+---@field files integer
+---@field ffree integer
 
 ---@class std.fs
 local fs = {}
@@ -543,7 +571,9 @@ function fs.writeFile(path, data, offset)
 		return nil, err, errno
 	end
 
-	local buf = buffer.new(data)
+	local buf = buffer.new(0)
+	buf:set(data)
+
 	while #buf > 0 do
 		local written
 		written, err, errno = fs.write(fd, buf:peek():tostring(), offset)
