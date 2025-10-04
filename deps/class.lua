@@ -1,9 +1,8 @@
 local class = {}
 
----@class luvit.class
----@field __name string
----@field __base luvit.class|nil
----@field init fun(self: luvit.class, ...)
+---@class luvit.class<T>
+---@field init fun(self: `T`, ...)
+---@field __call fun(...): `T`
 
 function class.new(name, base)
 	local cls = {}

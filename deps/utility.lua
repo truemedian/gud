@@ -27,7 +27,7 @@ local function functionname(f, tbl, left, seen)
 	for k, v in pairs(tbl) do
 		if type(k) == "string" and v == f then
 			return k, left
-        elseif type(v) == "table" then
+		elseif type(v) == "table" then
 			local name, level = functionname(f, v, left - 1, seen)
 			if name and level > best_level then
 				best_name = k .. "." .. name
@@ -236,5 +236,64 @@ end
 
 _G.error = utility.error
 _G.assert = utility.assert
+
+function utility.bind1(fn, a)
+	return function(...)
+		return fn(a, ...)
+	end
+end
+
+function utility.bind2(fn, a, b)
+	return function(...)
+		return fn(a, b, ...)
+	end
+end
+
+function utility.bind3(fn, a, b, c)
+	return function(...)
+		return fn(a, b, c, ...)
+	end
+end
+
+function utility.bind4(fn, a, b, c, d)
+	return function(...)
+		return fn(a, b, c, d, ...)
+	end
+end
+
+function utility.bind(fn, ...)
+	local bound_len = select("#", ...)
+	if bound_len == 0 then
+		return fn
+	elseif bound_len == 1 then
+		return utility.bind1(fn, ...)
+	elseif bound_len == 2 then
+		return utility.bind2(fn, ...)
+	elseif bound_len == 3 then
+		return utility.bind3(fn, ...)
+	elseif bound_len == 4 then
+		return utility.bind4(fn, ...)
+	else
+		local bound_args = { ... }
+		local info = debug.getinfo(fn, "u")
+		local nparams = info.isvararg and math.huge or info.nparams or math.huge
+		local left = nparams - bound_len
+
+		if left <= 0 then
+			return function()
+				return fn(unpack(bound_args, 1, nparams))
+			end
+		end
+
+		return function(...)
+			local n = math.min(select("#", ...), left)
+			for i = 1, n do
+				bound_args[bound_len + i] = select(i, ...)
+			end
+
+			return fn(unpack(bound_args, 1, bound_len + n))
+		end
+	end
+end
 
 return utility

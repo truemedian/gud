@@ -1,53 +1,46 @@
-local readable = require("stream/readable.lua")
-local writable = require("stream/writable.lua")
+local class = import("class")
+local Readable = import("readable").Base
+local Writable = import("writable").Base
 
 local chunked = {}
 
 -- #region chunked.readable
 
----@class luvit.http.chunked.readable : luvit.stream.readable
----@field private source luvit.stream.readable
----@field private first boolean
----@field private remaining integer
+---@class luvit.http.chunked.Readable : luvit.readable.Base
+---@field private source luvit.readable.Base # the source readable stream
+---@field private first boolean # whether or not this is the first chunk
+---@field private remaining integer # number of bytes remaining in the current chunk
 ---
 --- A readable stream that reads chunked HTTP data from another readable stream.
-chunked.readable = {}
-chunked.readable.__index = chunked.readable
+local ChunkedReadable = class("http.chunked.Readable", Readable)
 
-for k, v in pairs(readable) do
-	chunked.readable[k] = v
-end
-
---- Create a new chunked readable stream.
----
----@param source luvit.stream.readable the source readable stream
----@return luvit.http.chunked.readable stream
----@nodiscard
-function chunked.readable.new(source)
-	local self = setmetatable({
-		source = source,
-		remaining = 0,
-		first = true,
-	}, chunked.readable)
-	self:init()
-
-	return self
+---@protected
+---@param source luvit.readable.Base the source readable stream
+function ChunkedReadable:init(source)
+	Readable.init(self)
+	self.source = source
+	self.first = true
+	self.remaining = 0
 end
 
 --- Request for the stream to fill its internal buffer with at least `count` more bytes.
 ---
 ---@protected
----@param count integer a hint of how many bytes the caller would like to have available
----@return integer count number of new bytes available in the internal buffer
+---@param count integer # a hint of how many bytes the caller would like to have available
+---@param timeout integer|nil # a timeout for individual read operations in milliseconds
+---@return integer count # number of new bytes available in the internal buffer
+---@return boolean|nil timeout # whether or not a timeout occurred
 ---@nodiscard
-function chunked.readable:fill(count)
+function ChunkedReadable:fill(count, timeout)
 	if self.remaining == 0 then
 		if self.first then
 			self.first = false
 		else
 			-- Consume the trailing \r\n after the previous chunk
-			local line, err = self.source:readLine(2)
-			if err then
+			local line, err = self.source:readLine(2, false, timeout)
+			if err == "timeout" then
+				return 0, true
+			elseif err then
 				self.error = err
 				return 0
 			elseif #line ~= 0 then
@@ -56,8 +49,10 @@ function chunked.readable:fill(count)
 			end
 		end
 
-		local line, err = self.source:readLine(128):tostring()
-		if err then
+		local line, err = self.source:readLine(128, false, timeout)
+		if err == "timeout" then
+			return 0, true
+		elseif err then
 			self.error = err
 			return 0
 		elseif not line then
@@ -65,7 +60,7 @@ function chunked.readable:fill(count)
 			return 0
 		end
 
-		local size = line:match("^([0-9a-fA-F]+)")
+		local size = line:tostring():match("^([0-9a-fA-F]+)")
 		if not size then
 			self.error = "invalid chunk"
 			return 0
@@ -78,8 +73,10 @@ function chunked.readable:fill(count)
 		end
 	end
 
-	local chunk, read_err = self.source:readAtMost(self.remaining)
-	if read_err then
+	local chunk, read_err = self.source:readAtMost(self.remaining, timeout)
+	if read_err == "timeout" then
+		return 0, true
+	elseif read_err then
 		self.error = read_err
 		return 0
 	end
@@ -98,55 +95,51 @@ end
 -- #endregion
 -- #region chunked.writable
 
----@class luvit.http.chunked.writable : luvit.stream.writable
----@field private dest luvit.stream.writable
+---@class luvit.http.chunked.Writable : luvit.writable.Base
+---@field private dest luvit.writable.Base
 ---
 --- A writable stream that writes chunked HTTP data to another writable stream.
-chunked.writable = {}
-chunked.writable.__index = chunked.writable
+local ChunkedWritable = class("http.chunked.Writable", Writable)
 
-for k, v in pairs(writable) do
-	chunked.writable[k] = v
-end
-
---- Create a new chunked writable stream.
----
----@param dest luvit.stream.writable the destination writable stream
----@return luvit.http.chunked.writable stream
----@nodiscard
-function chunked.writable.new(dest)
-	local self = setmetatable({
-		dest = dest,
-	}, chunked.writable)
-	self:init()
-	return self
+---@protected
+---@param dest luvit.writable.Base the destination writable stream
+function ChunkedWritable:init(dest)
+	Writable.init(self)
+	self.dest = dest
 end
 
 --- Write as much data as possible from the write buffer and the optional extra data to the underlying stream.
 ---
 ---@protected
----@param extra string additional data to write after the buffered data
----@return integer number of bytes written from the write buffer and extra data
----@return string|nil error if an error occurred during writing
+---@param extra string # additional data to write after the buffered data
+---@param timeout integer|nil # a timeout for individual write operations in milliseconds
+---@return integer number # of bytes written from the write buffer and extra data
+---@return boolean|nil timeout # whether or not a timeout occurred
 ---@nodiscard
-function chunked.writable:drain(extra)
+function ChunkedWritable:drain(extra, timeout)
 	local buffered = self.write_buffer:read():tostring()
 
-	local ok, err = self.dest:write(string.format("%x\r\n", #buffered + #extra))
-	if not ok then
+	local ok, err = self.dest:write(string.format("%x\r\n", #buffered + #extra), timeout)
+	if err == "timeout" then
+		return 0, true
+	elseif not ok then
 		self.error = err
-		return 0, err
+		return 0
 	end
 
-	ok, err = self.dest:write(buffered)
-	if not ok then
+	ok, err = self.dest:write(buffered, timeout)
+	if err == "timeout" then
+		return 0, true
+	elseif not ok then
 		self.error = err
 		return 0
 	end
 
 	if #extra > 0 then
-		ok, err = self.dest:write(extra)
-		if not ok then
+		ok, err = self.dest:write(extra, timeout)
+		if err == "timeout" then
+			return 0, true
+		elseif not ok then
 			self.error = err
 			return 0
 		end
@@ -156,26 +149,26 @@ function chunked.writable:drain(extra)
 end
 
 --- Finish writing. This will flush any remaining data in the write buffer.
----@return boolean
----@return string|nil
-function chunked.writable:finish()
-	if self.error then
-		return false, self.error
+---
+---@param timeout integer|nil # a timeout for individual write operations in milliseconds
+---@return boolean success # true if all data was flushed, false if an error occurred
+---@return string|nil error # if an error occurred
+---@nodiscard
+function ChunkedWritable:finish(timeout)
+	local flush_ok, flush_err = Writable.finish(self, timeout)
+	if not flush_ok then
+		return false, flush_err
 	end
 
-	local ok, err = self.dest:write("0\r\n\r\n")
-	if not ok then
+	local ok, err = self.dest:write("0\r\n\r\n", timeout)
+	if err == "timeout" then
+		return false, "timeout"
+	elseif not ok then
+		self.error = err
 		return false, err
 	end
 
-	if #self.write_buffer > 0 then
-		ok, err = self:flush()
-		if not ok then
-			return false, err
-		end
-	end
-
-	return self.dest:finish()
+	return self.dest:finish(timeout)
 end
 
 return chunked

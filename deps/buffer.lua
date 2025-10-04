@@ -1,10 +1,6 @@
 local has_ffi, ffi = pcall(require, "ffi")
 
-local slice = {}
-slice.__index = slice
-
-local buffer = {}
-buffer.__index = buffer
+local class = import("class")
 
 -- translate relative index to absolute index.
 -- positive values count from the start, negative values count from the end.
@@ -37,6 +33,7 @@ local function relative_end(len, j)
 end
 
 if has_ffi then
+	-- #region ffi implementation
 	local ref_table = { [0] = nil }
 
 	local function store_ref(v)
@@ -75,18 +72,43 @@ if has_ffi then
 	-- avoids issues when statically linked on windows
 	local C = ffi.os == "Windows" and ffi.load("msvcrt") or ffi.C
 
+	-- #region slice
+
+	---@class luvit.slice
+	---@field package ptr ffi.cdata* # pointer to the start of the slice
+	---@field package length integer # length of the slice
+	---@field private ref integer|nil # reference to the original string or buffer to keep it
+	local slice = class("slice")
+
+	---@protected
+	---@param str string # the string to create a slice for
+	function slice:init(str)
+		self.ptr = ffi.cast("const uint8_t *", str)
+		self.length = #str
+		self.ref = store_ref(str)
+	end
+
+	--- Returns a slice object for the given string or slice. Does not create a copy for an existing slice.
+	---
+	---@param str string|luvit.slice # the string or slice to create a slice for
+	---@return luvit.slice # the new slice
+	---@nodiscard
 	function slice.new(str)
 		if getmetatable(str) == slice then
+			---@type luvit.slice
 			return str
 		end
 
-		return setmetatable({
-			ptr = ffi.cast("const uint8_t *", str),
-			length = #str,
-			ref = store_ref(str),
-		}, slice)
+		return slice(str)
 	end
 
+	slice.empty = slice("")
+
+	--- Get the byte value at index `i`, or between indices `i` and `j` (inclusive).
+	---
+	---@param i integer # start index
+	---@param j? integer # optional end index, defaults to `i`
+	---@return integer ... # the byte values between indices `i` and `j`
 	function slice:byte(i, j)
 		assert(type(i) == "number", "bad argument #1 to 'byte' (number expected)")
 		assert(type(j) == "number" or j == nil, "bad argument #2 to 'byte' (number or nil expected)")
@@ -104,11 +126,19 @@ if has_ffi then
 		return ffi.string(self.ptr + i - 1, len):byte(1, len)
 	end
 
+	--- Get the length of the slice in bytes.
+	---
+	---@return integer len # number of bytes in the slice
 	function slice:len()
 		return self.length
 	end
 	slice.__len = slice.len
 
+	--- Get a new slice representing the bytes between indices `i` and `j` (inclusive).
+	---
+	---@param i integer # start index
+	---@param j? integer # optional end index, defaults to the length of the slice
+	---@return luvit.slice # the new slice
 	function slice:sub(i, j)
 		i = relative_start(self.length, i)
 		j = j and relative_end(self.length, j) or self.length
@@ -124,6 +154,12 @@ if has_ffi then
 		}, slice)
 	end
 
+	--- Return the index of the first occurrence of `substring` in the slice, or `nil` if not found.
+	--- The search starts at the optional index `init`, or at the beginning of the slice if `init` is not specified.
+	---
+	---@param substring string|luvit.slice # the substring to search for
+	---@param init? integer # starting index
+	---@return integer? idx # the index of the first occurrence of `substring`, or `nil` if not found
 	function slice:find(substring, init)
 		local len = self.length
 		local ptr = self.ptr
@@ -131,15 +167,15 @@ if has_ffi then
 		init = init and relative_start(len, init) or 1
 		substring = slice.new(substring)
 
-		local sublen = substring.length
-		local subptr = substring.ptr
+		local subs_len = substring.length
+		local subs_ptr = substring.ptr
 
-		local chr = subptr[0]
+		local chr = subs_ptr[0]
 
 		local pos = init - 1
-		if sublen == 0 or pos >= len then
+		if subs_len == 0 or pos >= len then
 			return nil
-		elseif sublen == 1 then
+		elseif subs_len == 1 then
 			local res = C.memchr(ptr + pos, chr, len - pos)
 			if res == nil then
 				return nil
@@ -148,20 +184,26 @@ if has_ffi then
 			return tonumber(ffi.cast("uintptr_t", res) - ffi.cast("uintptr_t", ptr)) + 1
 		end
 
-		while pos <= len - sublen do
-			local next_match = C.memchr(ptr + pos, chr, len - pos - sublen + 1)
+		while pos <= len - subs_len do
+			local next_match = C.memchr(ptr + pos, chr, len - pos - subs_len + 1)
 			if next_match == nil then
 				return nil
 			end
 
 			pos = tonumber(ffi.cast("uintptr_t", next_match) - ffi.cast("uintptr_t", ptr)) + 1
 
-			if C.memcmp(ptr + pos, subptr + 1, sublen - 1) == 0 then
+			if C.memcmp(ptr + pos, subs_ptr + 1, subs_len - 1) == 0 then
 				return pos
 			end
 		end
 	end
 
+	--- Return the index of the first occurrence any item of `substring` in the slice, or `nil` if not found.
+	--- The search starts at the optional index `init`, or at the beginning of the slice if `init` is not specified.
+	---
+	---@param substring string|luvit.slice # items to search for
+	---@param init? integer # starting index
+	---@return integer? idx # the index of the first occurrence of any item in `substring`, or `nil` if not found
 	function slice:find_any(substring, init)
 		substring = slice.new(substring)
 
@@ -185,6 +227,12 @@ if has_ffi then
 		return nil
 	end
 
+	--- Return the index of the first occurrence any item not of `substring` in the slice, or `nil` if not found.
+	--- The search starts at the optional index `init`, or at the beginning of the slice if `init` is not specified.
+	---
+	---@param substring string|luvit.slice # items to skip
+	---@param init? integer # starting index
+	---@return integer? idx # the index of the first occurrence of any item not in `substring`, or `nil` if not found
 	function slice:find_not_any(substring, init)
 		substring = slice.new(substring)
 
@@ -208,6 +256,11 @@ if has_ffi then
 		return nil
 	end
 
+	--- Return `true` if the contents of this slice is equal to the contents of `other`, `false` otherwise.
+	---
+	---@param self string|luvit.slice # the first slice to compare
+	---@param other string|luvit.slice # the second slice to compare
+	---@return boolean same # `true` if the contents are equal, `false` otherwise
 	function slice:equals(other)
 		self = slice.new(self)
 		other = slice.new(other)
@@ -220,11 +273,15 @@ if has_ffi then
 	end
 	slice.__eq = slice.equals
 
+	--- Return the string representation of the slice.
+	---
+	---@return string str # the string representation of the slice
 	function slice:tostring()
 		return ffi.string(self.ptr, self.length)
 	end
 	slice.__tostring = slice.tostring
 
+	--- Release all references to the underlying data.
 	function slice:free()
 		if self.ref then
 			free_ref(self.ref)
@@ -236,25 +293,39 @@ if has_ffi then
 	end
 	slice.__gc = slice.free
 
+	-- #endregion
+	-- #region buffer
+
+	---@class luvit.buffer
+	---@field private ptr ffi.cdata* # pointer to the start of the buffer
+	---@field private capacity integer # total capacity of the buffer
+	---@field private head integer # index of the first valid byte in the buffer
+	---@field private tail integer # index of the first free byte in the buffer
+	---@field private ref integer|nil # reference to the original string or buffer to keep it
+	local buffer = class("buffer")
+
 	local initial_size = 64
-	function buffer.new(size)
-		local self = setmetatable({
-			ptr = nil,
-			capacity = 0,
-			head = 0,
-			tail = 0,
-			ref = nil,
-		}, buffer)
+
+	---@protected
+	---@param size? integer # initial size of the buffer
+	function buffer:init(size)
+		self.ptr = nil
+		self.capacity = 0
+		self.head = 0
+		self.tail = 0
+		self.ref = nil
 
 		if size and size > initial_size then
 			self:grow(size)
 		elseif size ~= 0 then
 			self:grow(initial_size)
 		end
-
-		return self
 	end
 
+	--- Set the buffer to the given string, replacing any existing contents.
+	---
+	---@param str string|luvit.slice|luvit.buffer # the new contents of the buffer
+	---@return luvit.buffer self
 	function buffer:set(str)
 		self:free()
 
@@ -267,7 +338,6 @@ if has_ffi then
 			self.tail = str.tail
 		elseif getmetatable(str) == slice then
 			local len = str.length
-
 			self.ptr = str.ptr
 			self.capacity = len
 			self.head = 0
@@ -284,16 +354,21 @@ if has_ffi then
 		return self
 	end
 
+	--- Get the length of the readable portion in bytes.
+	---
+	---@return integer len # number of readable bytes
 	function buffer:len()
 		return self.tail - self.head
 	end
 	buffer.__len = buffer.len
 
+	--- Reset the buffer to empty while keeping the allocated capacity.
 	function buffer:reset()
 		self.head = 0
 		self.tail = 0
 	end
 
+	--- Reset the buffer to empty and free any allocated memory.
 	function buffer:free()
 		if self.ref then
 			free_ref(self.ref)
@@ -310,6 +385,9 @@ if has_ffi then
 	end
 	buffer.__gc = buffer.free
 
+	--- Grow the buffer so that at least `n` additional bytes can be written without further allocations.
+	---
+	---@param requested integer # number of additional bytes needed
 	function buffer:grow(requested)
 		local cur_len = self.tail - self.head
 		local min_len = cur_len + requested
@@ -360,6 +438,8 @@ if has_ffi then
 		self.capacity = new_len
 	end
 
+	--- Append `str` to the buffer.
+	---@param str string|luvit.slice|luvit.buffer
 	function buffer:write(str)
 		if getmetatable(str) == buffer then
 			local len = str.tail - str.head
@@ -382,6 +462,12 @@ if has_ffi then
 		end
 	end
 
+	--- Peek at `n` bytes offset `i` bytes from the beginning of the buffer without consuming them, or peek at the
+	--- entire buffer if `n` is not specified.
+	---
+	---@param n? integer number of bytes to peek at
+	---@param start? integer offset from the beginning of the buffer, 0 means the beginning
+	---@return luvit.slice
 	function buffer:peek(n, start)
 		local len = self.tail - self.head
 
@@ -395,194 +481,28 @@ if has_ffi then
 		}, slice)
 	end
 
+	--- Read `n` bytes from the buffer, or the entire buffer if `n` is not specified.
+	---
+	---@param n? integer
+	---@return luvit.slice
 	function buffer:read(n)
 		local str = buffer.peek(self, n)
 		self.head = self.head + #str
 		return str
 	end
 
+	--- Discard `n` bytes from the front of the buffer, or discard all bytes if `n` is not specified.
+	---
+	---@param n? integer
 	function buffer:skip(n)
 		assert(n >= 0, "invalid forward offset")
 		self.head = math.min(self.capacity, self.head + n)
 	end
+
+	-- #endregion
+	-- #endregion
+
+	buffer.slice = slice
+	return buffer
 else
-	function slice.new(str) end
-
-	function slice:byte(i, j) end
-
-	function slice:len()
-		return self.length
-	end
-	slice.__len = slice.len
-
-	function slice:sub(i, j) end
-
-	function slice:find(substring, init) end
-
-	function slice:find_any(substring, init) end
-
-	function slice:equals(other) end
-	slice.__eq = slice.equals
-
-	function slice:tostring() end
-	slice.__tostring = slice.tostring
-
-	function slice:free() end
-
-	function buffer.new(size)
-		return setmetatable({
-			ptr = { nil, nil, nil, nil, nil, nil, nil, nil },
-			-- index of the head in the `ptr` array
-			head_outer = 1,
-			-- index of the head in the `ptr[head_outer]` string
-			head_inner = 1,
-			-- the number of bytes available from `ptr[head_outer]` starting at `head_inner` to the end of the string
-			length = 1,
-			-- if this buffer needs to copy on write
-			ref = false,
-		}, buffer)
-	end
-
-	function buffer:set(str)
-		self:free()
-
-		if getmetatable(str) == buffer then
-			self.ptr = str.ptr
-			self.head_outer = str.head_outer
-			self.head_inner = str.head_inner
-			self.length = str.length
-			self.ref = true
-		elseif getmetatable(str) == slice then
-			self.ptr = str.ptr
-			self.head_outer = str.start_outer
-			self.head_inner = str.start_inner
-			self.length = str.length
-			self.ref = true
-		else
-			self.ptr[1] = str
-			self.head_outer = 1
-			self.head_inner = 1
-			self.length = #str
-			self.ref = false
-		end
-	end
-
-	function buffer:len()
-		return self.length
-	end
-	buffer.__len = buffer.len
-
-	function buffer:reset()
-		self.head_outer = 1
-		self.head_inner = 1
-		self.length = 0
-	end
-
-	function buffer:free()
-		self.ptr = { nil, nil, nil, nil, nil, nil, nil, nil }
-
-		self.head_outer = 1
-		self.head_inner = 1
-		self.length = 0
-		self.ref = false
-	end
-
-	function buffer:grow(requested)
-		if self.ref then
-			local new_ptr = {}
-
-			new_ptr[1] = self.ptr[self.head_outer]:sub(self.head_inner)
-			for i = self.head_outer + 1, #self.ptr do
-				new_ptr[i - self.head_outer + 1] = self.ptr[i]
-			end
-
-			self.head_outer = 1
-			self.head_inner = 1
-			self.ptr = new_ptr
-			self.ref = false
-		end
-	end
-
-	function buffer:write(str)
-		if getmetatable(str) == buffer then
-			self:grow(0)
-
-			local i = #self.ptr + 1
-			local n = str.length
-
-			self.ptr[i] = str.ptr[str.head_outer]:sub(str.head_inner, str.head_inner + n - 1)
-			n = n - #self.ptr[i]
-
-			for j = str.head_outer + 1, #str.ptr do
-				i = i + 1
-				self.ptr[i] = str.ptr[j]:sub(1, n)
-				n = n - #str.ptr[j]
-
-				if n <= 0 then
-					break
-				end
-			end
-
-			self.length = self.length + str.length
-		elseif getmetatable(str) == slice then
-			self:grow(0)
-
-			local i = #self.ptr + 1
-			local n = str.length
-
-			self.ptr[i] = str.ptr[str.start_outer]:sub(str.start_inner, str.start_inner + n - 1)
-			n = n - #self.ptr[i]
-
-			for j = str.start_outer + 1, #str.ptr do
-				i = i + 1
-				self.ptr[i] = str.ptr[j]:sub(1, n)
-				n = n - #str.ptr[j]
-
-				if n <= 0 then
-					break
-				end
-			end
-
-			self.length = self.length + str.length
-		else
-			self:grow(0)
-
-			self.ptr[#self.ptr + 1] = str
-			self.length = self.length + #str
-		end
-	end
-
-	function buffer:peek(n, start) end
-
-	function buffer:read(n)
-		local str = buffer.peek(self, n)
-		self:skip(n)
-		return str
-	end
-
-	function buffer:skip(n)
-		assert(n >= 0, "invalid forward offset")
-
-		while n > 0 and self.length > 0 do
-			local available = #self.ptr[self.head_outer] - self.head_inner + 1
-			if n < available then
-				self.head_inner = self.head_inner + n
-				self.length = self.length - n
-				n = 0
-			else
-				n = n - available
-				self.length = self.length - available
-				self.head_outer = self.head_outer + 1
-				self.head_inner = 1
-			end
-		end
-	end
 end
-
-slice.empty = slice.new("")
-buffer.slice = slice
-
----@cast slice luvit.slice
----@cast buffer luvit.buffer
-
-return buffer
