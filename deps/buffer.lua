@@ -176,14 +176,36 @@ if has_ffi then
 			return nil
 		end
 
-		local min_found = math.huge
 		for i = init - 1, len - 1 do
 			if C.memchr(needle_ptr, ptr[i], needle_len) ~= nil then
-				min_found = math.min(min_found, i + 1)
+				return i + 1
 			end
 		end
 
-		return min_found == math.huge and nil or min_found
+		return nil
+	end
+
+	function slice:find_not_any(substring, init)
+		substring = slice.new(substring)
+
+		local len = self.length
+		local ptr = self.ptr
+
+		init = init and relative_start(len, init) or 1
+
+		local needle_len = substring.length
+		local needle_ptr = substring.ptr
+		if needle_len == 0 then
+			return nil
+		end
+
+		for i = init - 1, len - 1 do
+			if C.memchr(needle_ptr, ptr[i], needle_len) == nil then
+				return i + 1
+			end
+		end
+
+		return nil
 	end
 
 	function slice:equals(other)
@@ -224,11 +246,9 @@ if has_ffi then
 			ref = nil,
 		}, buffer)
 
-		if type(size) ~= "number" and size then
-			self:set(size)
-		elseif size and size > initial_size then
+		if size and size > initial_size then
 			self:grow(size)
-		else
+		elseif size ~= 0 then
 			self:grow(initial_size)
 		end
 

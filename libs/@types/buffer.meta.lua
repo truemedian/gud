@@ -52,6 +52,15 @@ function slice.find(self, substring, init) end
 ---@return integer?
 function slice.find_any(self, substring, init) end
 
+--- Return the index of the first occurrence any item not of `substring` in the slice, or `nil` if not found.
+--- The search starts at the optional index `init`, or at the beginning of the slice if `init` is not specified.
+---
+---@param self luvit.slice
+---@param substring string|luvit.slice
+---@param init? integer
+---@return integer?
+function slice.find_not_any(self, substring, init) end
+
 --- Return `true` if the contents of this slice is equal to the contents of `other`, `false` otherwise.
 ---
 ---@param self string|luvit.slice
