@@ -4,22 +4,22 @@ local sub, lower, find, match, gmatch = string.sub, string.lower, string.find, s
 local concat = table.concat
 local max = math.max
 
----@class std.path
+--- @class std.path
 local path = {}
 
----@class std.path.posix
+--- @class std.path.posix
 path.posix = {}
 path.posix.sep = '/'
 
----@class std.path.windows
+--- @class std.path.windows
 path.windows = {}
 path.windows.sep = '\\'
 
----@param impl std.path.posix|std.path.windows
----@param parts table
----@param i integer
----@param pathname string
----@return integer
+--- @param impl std.path.posix|std.path.windows
+--- @param parts table
+--- @param i integer
+--- @param pathname string
+--- @return integer
 local function append_parts(impl, parts, i, pathname)
 	for part in impl.split(pathname) do
 		if part ~= '.' then
@@ -31,10 +31,10 @@ local function append_parts(impl, parts, i, pathname)
 	return i
 end
 
----@param pathname string
----@param expected_ext? string|true
----@param basename_pattern string
----@return string
+--- @param pathname string
+--- @param expected_ext? string|true
+--- @param basename_pattern string
+--- @return string
 local function basename_impl(pathname, expected_ext, basename_pattern)
 	local basename = match(pathname, basename_pattern) or ''
 
@@ -57,12 +57,12 @@ local function basename_impl(pathname, expected_ext, basename_pattern)
 	end
 end
 
----@param impl std.path.posix|std.path.windows
----@param parts table
----@param i integer
----@param pathname string
----@param min integer
----@return string, integer
+--- @param impl std.path.posix|std.path.windows
+--- @param parts table
+--- @param i integer
+--- @param pathname string
+--- @param min integer
+--- @return string, integer
 local function resolve_middle_impl(impl, parts, i, pathname, min)
 	for part in impl.split(pathname) do
 		if part == '..' then
@@ -76,12 +76,12 @@ local function resolve_middle_impl(impl, parts, i, pathname, min)
 	return concat(parts, impl.sep, 1, i), i
 end
 
----@param impl std.path.posix|std.path.windows
----@param original string
----@param middle string
----@param absolute boolean
----@param root string
----@return string
+--- @param impl std.path.posix|std.path.windows
+--- @param original string
+--- @param middle string
+--- @param absolute boolean
+--- @param root string
+--- @return string
 local function resolve_finalize_impl(impl, original, middle, absolute, root)
 	if middle == '' then
 		if impl.isDirectory(original) then
@@ -115,10 +115,10 @@ local function resolve_finalize_impl(impl, original, middle, absolute, root)
 	return middle
 end
 
----@param impl std.path.posix|std.path.windows
----@param from string
----@param to string
----@return string
+--- @param impl std.path.posix|std.path.windows
+--- @param from string
+--- @param to string
+--- @return string
 local function relative_impl(impl, from, to)
 	from = impl.resolve(from)
 	to = impl.resolve(to)
@@ -160,30 +160,30 @@ local function relative_impl(impl, from, to)
 	return concat(rel_parts, impl.sep)
 end
 
----Whether a path is absolute.
----@param pathname string
----@return boolean
+--- Whether a path is absolute.
+--- @param pathname string
+--- @return boolean
 function path.posix.isAbsolute(pathname)
 	return sub(pathname, 1, 1) == '/'
 end
 
----Whether a path is a directory (has a trailing separator).
----@param pathname string
----@return boolean
+--- Whether a path is a directory (has a trailing separator).
+--- @param pathname string
+--- @return boolean
 function path.posix.isDirectory(pathname)
 	return sub(pathname, -1) == '/'
 end
 
----Returns a new path with no empty or redundant components
----@param pathname string
----@return string
+--- Returns a new path with no empty or redundant components
+--- @param pathname string
+--- @return string
 function path.posix.normalize(pathname)
 	return path.posix.join(pathname)
 end
 
----Returns the root of the path, will be "." for relative paths.
----@param pathname string
----@return string
+--- Returns the root of the path, will be "." for relative paths.
+--- @param pathname string
+--- @return string
 function path.posix.getRoot(pathname)
 	if path.posix.isAbsolute(pathname) then
 		return '/'
@@ -192,9 +192,9 @@ function path.posix.getRoot(pathname)
 	end
 end
 
----Joins a list of paths together, does not duplicate path separators.
----@param ... string
----@return string
+--- Joins a list of paths together, does not duplicate path separators.
+--- @param ... string
+--- @return string
 function path.posix.join(...)
 	local first = select(1, ...)
 	if first == nil then
@@ -222,24 +222,24 @@ function path.posix.join(...)
 	return concat(parts, '/', 1, i)
 end
 
----Splits a path into its directory components.
----@param pathname string
----@return fun(): string|nil
+--- Splits a path into its directory components.
+--- @param pathname string
+--- @return fun(): string|nil
 function path.posix.split(pathname)
 	return gmatch(pathname, '[^/]+')
 end
 
----This function takes a path and returns a absolute path.
+--- This function takes a path and returns a absolute path.
 ---
----If the path uses `..` segments on the root directory, they are discarded.
----It also resolves `.` and `..` segments.
----The result does not have a trailing separator
+--- If the path uses `..` segments on the root directory, they are discarded.
+--- It also resolves `.` and `..` segments.
+--- The result does not have a trailing separator
 ---
----If the path is relative, it uses `parent` or the current working directory as a starting point
----Note: This function may not be correct when used on symlinked paths, it will not follow symlinks.
----@param pathname string
----@param parent? string
----@return string
+--- If the path is relative, it uses `parent` or the current working directory as a starting point
+--- Note: This function may not be correct when used on symlinked paths, it will not follow symlinks.
+--- @param pathname string
+--- @param parent? string
+--- @return string
 function path.posix.resolve(pathname, parent)
 	local parts, i = {}, 0
 	local absolute = path.posix.isAbsolute(pathname)
@@ -260,85 +260,85 @@ function path.posix.resolve(pathname, parent)
 	return resolve_finalize_impl(path.posix, pathname, pathstr, absolute, root)
 end
 
----Strip the last component from a path.
+--- Strip the last component from a path.
 ---
----If the path is a file in the current directory (no directory component) or the root directory (just `/`)
----Then this returns the empty string
----@param pathname string
----@return string
+--- If the path is a file in the current directory (no directory component) or the root directory (just `/`)
+--- Then this returns the empty string
+--- @param pathname string
+--- @return string
 function path.posix.dirname(pathname)
 	return match(pathname, '^(.+)/[^/]+/*$') or ''
 end
 
----Returns the name of a file from a path.
+--- Returns the name of a file from a path.
 ---
----If the path has trailing slashes, they are stripped off and ignored.
+--- If the path has trailing slashes, they are stripped off and ignored.
 ---
----If `expected_ext` is true, this will always strip the extension from the name.
----If `expected_ext` is a string, this will only strip that string from the end.
----@param pathname string
----@param expected_ext? string|true
----@return string
+--- If `expected_ext` is true, this will always strip the extension from the name.
+--- If `expected_ext` is a string, this will only strip that string from the end.
+--- @param pathname string
+--- @param expected_ext? string|true
+--- @return string
 function path.posix.basename(pathname, expected_ext)
 	return basename_impl(pathname, expected_ext, '([^/]+)/*$')
 end
 
----Returns the extension of the file name (if any).
+--- Returns the extension of the file name (if any).
 ---
----Files that end with a `.` are considered to have no extension.
----Files that start with a `.` do not consider the first `.` as an extension.
+--- Files that end with a `.` are considered to have no extension.
+--- Files that start with a `.` do not consider the first `.` as an extension.
 ---
----Examples:
+--- Examples:
 ---    'init.lua' => '.lua'
 ---    'src/init.lua' => '.lua'
 ---    '.gitignore' => ''
 ---    'keep.' => '.'
 ---    'init.lua.keep' => '.keep'
 ---    'src/init.lua.keep/' => '.keep'
----@param pathname string
----@return string
+--- @param pathname string
+--- @return string
 function path.posix.extension(pathname)
 	local basename = path.posix.basename(pathname)
 	return match(basename, '[^%.](%.[^%.]*)$') or ''
 end
 
----Returns the relative path from `from` to `to`.
+--- Returns the relative path from `from` to `to`.
 ---
----If `from` and `to` each resolve to the same path (after calling `resolve` on each), `"."` is returned.
----@param from string
----@param to string
----@return string
+--- If `from` and `to` each resolve to the same path (after calling `resolve` on each), `"."` is returned.
+--- @param from string
+--- @param to string
+--- @return string
 function path.posix.relative(from, to)
 	return relative_impl(path.posix, from, to)
 end
 
----Whether a path is absolute.
----@param pathname string
----@return boolean
+--- Whether a path is absolute.
+--- @param pathname string
+--- @return boolean
 function path.windows.isAbsolute(pathname)
 	return find(pathname, '^(\\\\[^\\]+\\)') ~= nil
 		or find(pathname, '^[a-zA-Z]:[\\/]') ~= nil
 		or find(pathname, '^[\\/]') ~= nil
 end
 
----Whether a path is a directory (has a trailing separator).
----@param pathname string
----@return boolean
+--- Whether a path is a directory (has a trailing separator).
+--- @param pathname string
+--- @return boolean
 function path.windows.isDirectory(pathname)
 	local last = sub(pathname, -1)
 	return last == '/' or last == '\\'
 end
 
----Returns a new path with no empty or redundant components
----@param pathname string
----@return string
+--- Returns a new path with no empty or redundant components
+--- @param pathname string
+--- @return string
 function path.windows.normalize(pathname)
 	return path.windows.join(pathname)
 end
 
----Returns the root of the path, will be "." for relative paths.
----@param pathname string
----@return string
+--- Returns the root of the path, will be "." for relative paths.
+--- @param pathname string
+--- @return string
 function path.windows.getRoot(pathname)
 	local unc_host = match(pathname, '^(\\\\[^\\]+\\)')
 	if unc_host then
@@ -363,9 +363,9 @@ function path.windows.getRoot(pathname)
 	return '.'
 end
 
----Joins a list of paths together, does not duplicate path separators.
----@param ... string
----@return string
+--- Joins a list of paths together, does not duplicate path separators.
+--- @param ... string
+--- @return string
 function path.windows.join(...)
 	local first = select(1, ...)
 	if first == nil then
@@ -395,25 +395,25 @@ function path.windows.join(...)
 	end
 end
 
----Splits a path into its directory components.
----@param pathname string
----@return fun(): string|nil
+--- Splits a path into its directory components.
+--- @param pathname string
+--- @return fun(): string|nil
 function path.windows.split(pathname)
 	local root = path.windows.getRoot(pathname)
 	return gmatch(pathname:sub(#root + 1), '[^/\\]+')
 end
 
----This function takes a path and returns a absolute path.
+--- This function takes a path and returns a absolute path.
 ---
----If the path uses `..` segments on the root directory, they are discarded.
----It also resolves `.` and `..` segments.
----The result does not have a trailing separator
+--- If the path uses `..` segments on the root directory, they are discarded.
+--- It also resolves `.` and `..` segments.
+--- The result does not have a trailing separator
 ---
----If the path is relative, it uses `parent` or the current working directory as a starting point
----Note: This function may not be correct when used on symlinked paths, it will not follow symlinks.
----@param pathname string
----@param parent? string
----@return string
+--- If the path is relative, it uses `parent` or the current working directory as a starting point
+--- Note: This function may not be correct when used on symlinked paths, it will not follow symlinks.
+--- @param pathname string
+--- @param parent? string
+--- @return string
 function path.windows.resolve(pathname, parent)
 	local parts, i = {}, 0
 	local absolute = path.windows.isAbsolute(pathname)
@@ -454,54 +454,54 @@ function path.windows.resolve(pathname, parent)
 	return resolve_finalize_impl(path.windows, pathname, pathstr, absolute, root)
 end
 
----Strip the last component from a path.
+--- Strip the last component from a path.
 ---
----If the path is a file in the current directory (no directory component) or the root directory (just `/`)
----Then this returns the empty string
----@param pathname string
----@return string
+--- If the path is a file in the current directory (no directory component) or the root directory (just `/`)
+--- Then this returns the empty string
+--- @param pathname string
+--- @return string
 function path.windows.dirname(pathname)
 	return match(pathname, '^(.+)[/\\][^/\\]+[/\\]*$') or ''
 end
 
----Returns the name of a file from a path.
+--- Returns the name of a file from a path.
 ---
----If the path has trailing slashes, they are stripped off and ignored.
+--- If the path has trailing slashes, they are stripped off and ignored.
 ---
----If `expected_ext` is true, this will always strip the extension from the name.
----If `expected_ext` is a string, this will only strip that string from the end.
----@param pathname string
----@param expected_ext? string|true
----@return string
+--- If `expected_ext` is true, this will always strip the extension from the name.
+--- If `expected_ext` is a string, this will only strip that string from the end.
+--- @param pathname string
+--- @param expected_ext? string|true
+--- @return string
 function path.windows.basename(pathname, expected_ext)
 	return basename_impl(pathname, expected_ext, '([^/\\]+)[/\\]*$')
 end
 
----Returns the extension of the file name (if any).
+--- Returns the extension of the file name (if any).
 ---
----Files that end with a `.` are considered to have no extension.
----Files that start with a `.` do not consider the first `.` as an extension.
+--- Files that end with a `.` are considered to have no extension.
+--- Files that start with a `.` do not consider the first `.` as an extension.
 ---
----Examples:
+--- Examples:
 ---    'init.lua' => '.lua'
 ---    'src/init.lua' => '.lua'
 ---    '.gitignore' => ''
 ---    'keep.' => '.'
 ---    'init.lua.keep' => '.keep'
 ---    'src/init.lua.keep/' => '.keep'
----@param pathname string
----@return string
+--- @param pathname string
+--- @return string
 function path.windows.extension(pathname)
 	local basename = path.windows.basename(pathname)
 	return match(basename, '[^%.](%.[^%.]*)$') or ''
 end
 
----Returns the relative path from `from` to `to`.
+--- Returns the relative path from `from` to `to`.
 ---
----If `from` and `to` each resolve to the same path (after calling `resolve` on each), `"."` is returned.
----@param from string
----@param to string
----@return string
+--- If `from` and `to` each resolve to the same path (after calling `resolve` on each), `"."` is returned.
+--- @param from string
+--- @param to string
+--- @return string
 function path.windows.relative(from, to)
 	return relative_impl(path.windows, from, to)
 end
