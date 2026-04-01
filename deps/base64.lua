@@ -72,6 +72,8 @@ function base64.encode(data, pad, column, alphabet)
 	return concat(result, nil, 1, n - 1)
 end
 
+local map_cache = setmetatable({}, { __mode = 'v' })
+
 --- Decodes the given base64 string.
 ---
 --- @param data string
@@ -82,9 +84,14 @@ function base64.decode(data, alphabet)
 
 	assert(#alphabet == 64, 'alphabet must be 64 characters long')
 
-	local map = {}
-	for i = 1, 64 do
-		map[byte(alphabet, i)] = i - 1
+	local map = map_cache[alphabet]
+	if not map then
+		map = {}
+		for i = 1, 64 do
+			map[byte(alphabet, i)] = i - 1
+		end
+
+		map_cache[alphabet] = map
 	end
 
 	local result, n = {}, 1

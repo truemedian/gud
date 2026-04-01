@@ -16,7 +16,9 @@ function writer_tcp:init(socket)
 end
 
 function writer_tcp:flush(timeout)
-	local nwritten, tw_err = self.socket:try_write(self.buffer:parts())
+	local parts = self.buffer:parts()
+
+	local nwritten, tw_err = self.socket:try_write(parts)
 	if tw_err then
 		return 0, tw_err
 	end
@@ -39,7 +41,7 @@ function writer_tcp:flush(timeout)
 		return utility.assertresume(thread, nwritten, err)
 	end
 
-	local req, write_err = self.socket:write(self.buffer:parts(), function(err)
+	local req, write_err = self.socket:write(parts, function(err)
 		if err then
 			self.socket:shutdown()
 			return finish(0, err)

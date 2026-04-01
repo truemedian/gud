@@ -53,10 +53,7 @@ function buffer:peek(n)
 	end
 
 	if n == nil then
-		if self.offset ~= 1 then
-			self.chunks[self.head] = sub(self.chunks[self.head], self.offset)
-			self.offset = 1
-		end
+		self:_normalize_head()
 
 		local data = concat(self.chunks, nil, self.head, self.tail - 1)
 
@@ -138,9 +135,7 @@ function buffer:read(n)
 	end
 
 	if n == nil then
-		if self.offset ~= 1 then
-			self.chunks[self.head] = sub(self.chunks[self.head], self.offset)
-		end
+		self:_normalize_head()
 
 		local data = concat(self.chunks, nil, self.head, self.tail - 1)
 
@@ -287,11 +282,7 @@ function buffer:skip(n)
 	end
 end
 
---- Returns a valid lua sequence of buffered data chunks. The returned table must not be modified by the caller and is
---- only valid until the next buffer mutation.
----
---- @return string[]
-function buffer:parts()
+function buffer:_normalize_head()
 	if self.offset > 1 then
 		local head_chunk = self.chunks[self.head]
 		if head_chunk then
@@ -300,7 +291,9 @@ function buffer:parts()
 
 		self.offset = 1
 	end
+end
 
+function buffer:_shift()
 	if self.head ~= 1 then
 		local n = 1
 		for i = self.head, self.tail - 1 do
@@ -311,6 +304,15 @@ function buffer:parts()
 		self.tail = n
 		self.head = 1
 	end
+end
+
+--- Returns a valid lua sequence of buffered data chunks. The returned table must not be modified by the caller and is
+--- only valid until the next buffer mutation.
+---
+--- @return string[]
+function buffer:parts()
+	self:_normalize_head()
+	self:_shift()
 
 	return self.chunks
 end
@@ -320,14 +322,7 @@ end
 ---
 --- @return string|nil
 function buffer:chunk()
-	if self.offset > 1 then
-		local head_chunk = self.chunks[self.head]
-		if head_chunk then
-			self.chunks[self.head] = sub(head_chunk, self.offset)
-		end
-
-		self.offset = 1
-	end
+	self:_normalize_head()
 
 	return self.chunks[self.head]
 end

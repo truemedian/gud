@@ -1,8 +1,8 @@
 local buffer = require('buffer')
 local class = require('class')
 
-local byte = string.byte
-local find = string.find
+local byte, find = string.byte, string.find
+local max = math.max
 
 --- @class std.reader
 --- @field eof boolean Indicates whether or not the end of the stream has been reached.
@@ -125,19 +125,25 @@ end
 ---
 --- If `max_size` is provided, the reader will return an error if `ch` is not encountered within the first `max_size`
 --- bytes.
+---
+--- If `delim` is a pattern that can match more than `#delim` characters, then `delim_lookbehind` must be provided to indicate how many bytes are required for the pattern to be fully matched. The reader will look this many bytes back from the end of the buffer when searching for `delim` after receiving new data.
 --- @param delim string
 --- @param max_size? integer
 --- @param timeout? integer
-function reader:readUntil(delim, max_size, timeout)
+--- @param delim_lookbehind? integer
+function reader:readUntil(delim, max_size, timeout, delim_lookbehind)
 	max_size = max_size or math.huge
+	delim_lookbehind = delim_lookbehind or #delim
 
 	assert(type(delim) == 'string' and #delim > 0, 'delimiter must be a non-empty string')
 	assert(type(max_size) == 'number' and max_size > 0, 'max_size must be a positive number')
 
+	local last_index = 1
+
 	local new, err
 	while true do
 		local data = self.buffer:peek(max_size)
-		local i, j = find(data, delim)
+		local i, j = find(data, delim, last_index)
 
 		if i and j then
 			self.buffer:skip(j)
@@ -154,6 +160,8 @@ function reader:readUntil(delim, max_size, timeout)
 		if new < 1 then
 			return nil, 'end of stream'
 		end
+
+		last_index = max(#data - delim_lookbehind, 1)
 	end
 end
 

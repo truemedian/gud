@@ -26,43 +26,42 @@ function tcp.connect(host, service, hints)
 	assert(hints == nil or type(hints) == 'table', 'hints must be a table or nil')
 	assert(host ~= nil or service ~= nil, 'either host or service must be provided')
 
-	local awaiter = await()
-
 	if hints then
 		hints.protocol = hints.protocol or 6
 	else
 		hints = default_hints
 	end
 
-	local addr_ok, err1 = luv.getaddrinfo(host, service, hints, awaiter:callback())
+	local awaiter = await()
+	local addr_ok, getaddrinfo_err = luv.getaddrinfo(host, service, hints, awaiter:callback())
 	if not addr_ok then
-		return nil, err1
+		return nil, getaddrinfo_err
 	end
 
-	local err2, addresses = awaiter:wait()
-	if err2 then
-		return nil, err2
+	local resolve_err, addresses = awaiter:wait()
+	if resolve_err then
+		return nil, resolve_err
 	end
 
+	local connect_ok, connect_err
 	for _, address in ipairs(addresses) do
-		local socket, err3 = luv.new_tcp()
+		local socket, socket_err = luv.new_tcp()
 		if not socket then
-			return nil, err3
+			return nil, socket_err
 		end
 
-		local connect_ok, err4 = socket:connect(address.addr, address.port, awaiter:callback())
-		if not connect_ok then
-			socket:close()
-			return nil, err4
+		connect_ok, connect_err = socket:connect(address.addr, address.port, awaiter:callback())
+		if connect_ok then
+			local err5 = awaiter:wait()
+			if not err5 then
+				return tcp(socket)
+			end
 		end
 
-		local err5 = awaiter:wait()
-		if err5 then
-			socket:close()
-		else
-			return tcp(socket)
-		end
+		socket:close()
 	end
+
+	return nil, connect_err
 end
 
 function tcp:init(socket)
