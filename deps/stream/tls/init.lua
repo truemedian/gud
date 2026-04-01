@@ -16,12 +16,18 @@ local writer = require('stream/tls/writer')
 --- @field bout openssl.bio
 local tls = class('std.stream.tls')
 
+--- Perform a TLS handshake on the given stream, returning a new TLS stream on success.
+--- @param stream std.stream
+--- @param options table
+--- @param timeout? integer
+--- @return std.stream.tls|nil stream
+--- @return string|nil err
 function tls.handshake(stream, options, timeout)
 	options = options or {}
 	options.server = options.server == nil and (options.key ~= nil) or options.server
 
 	local ctx = options.context or context(options)
-	local self = tls(stream, ctx)
+	local self = tls(stream, ctx, options)
 
 	if not options.server then
 		assert(options.servername, 'servername is required for client connections')
@@ -89,9 +95,9 @@ function tls.handshake(stream, options, timeout)
 	return self
 end
 
-function tls:init(stream, ctx)
+function tls:init(stream, ctx, options)
 	local bin, bout = openssl.bio.mem(8192), openssl.bio.mem(8192)
-	local ssl = ctx:ssl(bin, bout, false)
+	local ssl = ctx:ssl(bin, bout, options.server)
 
 	self.reader = reader(stream.reader, bin, ssl)
 	self.writer = writer(stream.writer, bout, ssl)
@@ -107,6 +113,8 @@ function tls:getpeername()
 	return self.enciphered:getpeername()
 end
 
+--- Close the TLS connection, disallowing further reads and writes.
+--- @param timeout? integer
 function tls:close(timeout)
 	self.writer:flushAll(timeout)
 
@@ -115,11 +123,47 @@ function tls:close(timeout)
 	self.enciphered:close()
 end
 
+--- Shutdown the TLS connection, disallowing further writes.
+--- @param timeout? integer
 function tls:shutdown(timeout)
 	self.writer:flushAll(timeout)
 
 	self.writer.closed = true
 	self.enciphered:shutdown()
+end
+
+--- @class std.stream.tls.server
+tls.server = class('std.stream.tls.server')
+
+function tls.server:init(server, options)
+	self.enciphered = server
+
+	self.options = options or {}
+
+	options.server = true
+	options.context = options.context or context(options)
+end
+
+--- Bind the server to a specific host and port.
+--- @param host string
+--- @param port integer
+function tls.server:bind(host, port)
+	return self.enciphered:bind(host, port)
+end
+
+--- Start listening for incoming connections.
+--- @param backlog? integer
+--- @param callback fun(client: std.stream.tls)
+function tls.server:listen(backlog, callback)
+	return self.enciphered:listen(backlog, function(stream)
+		local client, err = tls.handshake(stream, self.options, self.options.handshake_timeout)
+		if not client or err then
+			stream:close()
+			return error(err or 'TLS handshake failed')
+		end
+
+		return callback(client)
+	end)
 end
 
 return tls

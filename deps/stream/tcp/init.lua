@@ -73,15 +73,53 @@ function tcp:getpeername()
 	return self.reader.socket:getpeername()
 end
 
-function tcp:close()
+--- Close the TCP connection, disallowing further reads and writes.
+--- @param timeout? integer
+function tcp:close(timeout)
+	self.writer:flushAll(timeout)
+
 	self.reader.eof = true
 	self.writer.closed = true
 	self.reader.socket:close()
 end
 
-function tcp:shutdown()
+--- Shutdown the TCP connection, disallowing further writes.
+--- @param timeout? integer
+function tcp:shutdown(timeout)
+	self.writer:flushAll(timeout)
+
 	self.writer.closed = true
 	self.reader.socket:shutdown()
+end
+
+--- @class std.stream.tcp.server
+tcp.server = class('std.stream.tcp.server')
+
+--- @param family? string|integer
+function tcp.server:init(family)
+	self.socket = luv.new_tcp(family)
+end
+
+--- Bind the server to a specific host and port.
+--- @param host string
+--- @param port integer
+function tcp.server:bind(host, port)
+	return assert(self.socket:bind(host, port))
+end
+
+--- Start listening for incoming connections.
+--- @param backlog? integer
+--- @param callback fun(client: std.stream.tcp)
+function tcp.server:listen(backlog, callback)
+	return assert(self.socket:listen(backlog or 256, function(err)
+		assert(not err, err)
+
+		local client = assert(luv.new_tcp())
+		self.socket:accept(client)
+
+		local stream = tcp(client)
+		return callback(stream)
+	end))
 end
 
 return tcp
