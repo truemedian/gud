@@ -315,6 +315,23 @@ function buffer:parts()
 	return self.chunks
 end
 
+--- Returns the most conviently continguuous chunk of buffered data from the front of the buffer, or `nil` if the
+--- buffer is empty.
+---
+--- @return string|nil
+function buffer:chunk()
+	if self.offset > 1 then
+		local head_chunk = self.chunks[self.head]
+		if head_chunk then
+			self.chunks[self.head] = sub(head_chunk, self.offset)
+		end
+
+		self.offset = 1
+	end
+
+	return self.chunks[self.head]
+end
+
 --- Clears all buffered data.
 function buffer:clear()
 	for i = self.head, self.tail - 1 do
