@@ -6,7 +6,7 @@ local await = require('await')
 local reader = require('stream/tcp/reader')
 local writer = require('stream/tcp/writer')
 
---- @class std.stream.tcp
+--- @class std.stream.tcp : std.stream
 --- @field reader std.stream.tcp.reader
 --- @field writer std.stream.tcp.writer
 local tcp = class('std.stream.tcp')
@@ -27,6 +27,7 @@ function tcp.connect(host, service, hints)
 	assert(host ~= nil or service ~= nil, 'either host or service must be provided')
 
 	if hints then
+		---@diagnostic disable-next-line: assign-type-mismatch
 		hints.protocol = hints.protocol or 6
 	else
 		hints = default_hints
@@ -67,10 +68,22 @@ end
 function tcp:init(socket)
 	self.reader = reader(socket)
 	self.writer = writer(socket)
+	self.socket = socket
 end
 
-function tcp:getpeername()
-	return self.reader.socket:getpeername()
+--- Performs an implementation specific control operation on the underlying stream.
+---
+--- The following commands are supported:
+--- - 'getpeername': returns the remote address and port as a table with `address` and `port` fields.
+--- @param command string
+--- @param ... any
+--- @return any
+function tcp:ioctl(command, ...)
+	if command == 'getpeername' then
+		return self.socket:getpeername()
+	end
+
+	error('unsupported ioctl command: ' .. tostring(command))
 end
 
 --- Close the TCP connection, disallowing further reads and writes.
@@ -80,7 +93,7 @@ function tcp:close(timeout)
 
 	self.reader.eof = true
 	self.writer.closed = true
-	self.reader.socket:close()
+	self.socket:close()
 end
 
 --- Shutdown the TCP connection, disallowing further writes.
@@ -89,15 +102,17 @@ function tcp:shutdown(timeout)
 	self.writer:flushAll(timeout)
 
 	self.writer.closed = true
-	self.reader.socket:shutdown()
+	self.socket:shutdown()
 end
 
---- @class std.stream.tcp.server
+--- @class std.stream.tcp.server : std.stream.server
+--- @field socket uv_tcp_t
 tcp.server = class('std.stream.tcp.server')
 
 --- @param family? string|integer
 function tcp.server:init(family)
-	self.socket = luv.new_tcp(family)
+	---@diagnostic disable-next-line: param-type-mismatch
+	self.socket = assert(luv.new_tcp(family))
 end
 
 --- Bind the server to a specific host and port.

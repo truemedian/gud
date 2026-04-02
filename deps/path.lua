@@ -246,7 +246,7 @@ function path.posix.resolve(pathname, parent)
 	local root = absolute and '/' or ''
 
 	if not path.posix.isAbsolute(pathname) then
-		local cwd_path = parent or luv.cwd()
+		local cwd_path = parent or luv.cwd() or '.'
 
 		if path.posix.isAbsolute(cwd_path) then
 			absolute = true
@@ -421,7 +421,7 @@ function path.windows.resolve(pathname, parent)
 	local min = 0
 
 	if not absolute then
-		local cwd_path = parent or luv.cwd()
+		local cwd_path = parent or luv.cwd() or '.'
 		local cwd_root = path.windows.getRoot(cwd_path)
 		local path_root = path.windows.getRoot(pathname)
 

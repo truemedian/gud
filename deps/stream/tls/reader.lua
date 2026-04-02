@@ -1,4 +1,6 @@
 local class = require('class')
+
+--- @type std.reader
 local reader = require('reader')
 
 --- @class std.stream.tls.reader : std.reader

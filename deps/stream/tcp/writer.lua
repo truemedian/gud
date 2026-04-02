@@ -1,4 +1,6 @@
 local class = require('class')
+
+--- @type std.writer
 local writer = require('writer')
 
 local timer = require('timer')

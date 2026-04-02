@@ -11,16 +11,8 @@ end
 
 local bad_x509_error = 'certificate must be an openssl.x509 or string'
 local bad_x509_chain_error = 'certificate chain must be a openssl.x509, string, openssl.x509[], string[]'
---- @class openssl.x509 : userdata
---- @field class 'openssl.x509'
-
 local bad_x509_store_error = 'certificate store must be a openssl.x509.store, string, openssl.x509[], string[]'
---- @class openssl.x509.store : userdata
---- @field class 'openssl.x509.store'
-
 local bad_pkey_error = 'private key must be an openssl.pkey, PEM string, or DER string'
---- @class openssl.pkey : userdata
---- @field class 'openssl.pkey'
 
 --- @param key string|openssl.pkey
 --- @return openssl.pkey
@@ -97,6 +89,7 @@ local function parseX509Store(store)
 	error(bad_x509_store_error)
 end
 
+--- @return openssl.ssl.ctx
 return function(options)
 	local ctx = openssl.ssl.ctx_new(options.protocol or 'TLS')
 

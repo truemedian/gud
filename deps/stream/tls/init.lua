@@ -6,10 +6,10 @@ local context = require('stream/tls/context')
 local reader = require('stream/tls/reader')
 local writer = require('stream/tls/writer')
 
---- @class std.stream.tls
+--- @class std.stream.tls : std.stream
 --- @field reader std.stream.tls.reader
 --- @field writer std.stream.tls.writer
---- @field enciphered std.stream
+--- @field underlying std.stream
 --- @field ctx openssl.ssl.ctx
 --- @field ssl openssl.ssl
 --- @field bin openssl.bio
@@ -101,16 +101,19 @@ function tls:init(stream, ctx, options)
 
 	self.reader = reader(stream.reader, bin, ssl)
 	self.writer = writer(stream.writer, bout, ssl)
-	self.enciphered = stream
+	self.underlying = stream
 
-	self.ctx = ctx
 	self.ssl = ssl
 	self.bin = bin
 	self.bout = bout
 end
 
-function tls:getpeername()
-	return self.enciphered:getpeername()
+--- Performs an implementation specific control operation on the underlying stream.
+--- @param command string
+--- @param ... any
+--- @return any
+function tls:ioctl(command, ...)
+	return self.underlying:ioctl(command, ...)
 end
 
 --- Close the TLS connection, disallowing further reads and writes.
@@ -120,7 +123,7 @@ function tls:close(timeout)
 
 	self.reader.eof = true
 	self.writer.closed = true
-	self.enciphered:close()
+	self.underlying:close()
 end
 
 --- Shutdown the TLS connection, disallowing further writes.
@@ -129,14 +132,16 @@ function tls:shutdown(timeout)
 	self.writer:flushAll(timeout)
 
 	self.writer.closed = true
-	self.enciphered:shutdown()
+	self.underlying:shutdown()
 end
 
---- @class std.stream.tls.server
+--- @class std.stream.tls.server : std.stream.server
+--- @field underlying std.stream.server
+--- @field options table
 tls.server = class('std.stream.tls.server')
 
 function tls.server:init(server, options)
-	self.enciphered = server
+	self.underlying = server
 
 	self.options = options or {}
 
@@ -148,14 +153,14 @@ end
 --- @param host string
 --- @param port integer
 function tls.server:bind(host, port)
-	return self.enciphered:bind(host, port)
+	return self.underlying:bind(host, port)
 end
 
 --- Start listening for incoming connections.
 --- @param backlog? integer
 --- @param callback fun(client: std.stream.tls)
 function tls.server:listen(backlog, callback)
-	return self.enciphered:listen(backlog, function(stream)
+	return self.underlying:listen(backlog, function(stream)
 		local client, err = tls.handshake(stream, self.options, self.options.handshake_timeout)
 		if not client or err then
 			stream:close()

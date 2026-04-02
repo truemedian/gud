@@ -1,4 +1,6 @@
 local class = require('class')
+
+--- @type std.writer
 local writer = require('writer')
 
 --- @class std.stream.tls.writer : std.writer
@@ -32,6 +34,7 @@ function writer_tls:flush(timeout)
 	return plain and #plain or 0
 end
 
+--- @param timeout? integer
 function writer_tls:flushAll(timeout)
 	local success, err = writer.flushAll(self, timeout)
 	if not success then
