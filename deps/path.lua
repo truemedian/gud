@@ -147,7 +147,7 @@ local function relative_impl(impl, from, to)
 	end
 
 	local rel_parts = { n = 0 }
-	for j = i, from_parts.n do
+	for _ = i, from_parts.n do
 		rel_parts.n = rel_parts.n + 1
 		rel_parts[rel_parts.n] = '..'
 	end

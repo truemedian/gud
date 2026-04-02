@@ -14,22 +14,30 @@ function reader:init()
 	self.buffer = buffer()
 end
 
---- Requests `n` bytes from the underlying source. The number `n` is a hint and the reader may either return fewer bytes or more bytes than requested.
+--- Requests `n` bytes from the underlying source. The number `n` is a hint and the reader may either return fewer bytes
+--- or more bytes than requested.
 ---
---- The reader should return as soon as at least one byte is available, but it may wait for more bytes to arrive before returning. If the reader returns `0` bytes, it means that the end of the stream has been reached.
+--- The reader should return as soon as at least one byte is available, but it may wait for more bytes to arrive before
+--- returning. If the reader returns `0` bytes, it means that the end of the stream has been reached.
 ---
---- The `timeout` parameter specifies the maximum amount of time (in milliseconds) that the reader should wait for data to become available. If the timeout is reached before any data is available, the reader should return an error message of `"timeout"`. The default for timeout is to wait indefinitely.
+--- The `timeout` parameter specifies the maximum amount of time (in milliseconds) that the reader should wait for data
+--- to become available. If the timeout is reached before any data is available, the reader should return an error
+--- message of `"timeout"`. The default for timeout is to wait indefinitely.
 --- @param n integer
 --- @param timeout? integer
 --- @return integer nread
 --- @return string|nil err
-function reader:fill(n, timeout)
+function reader:fill(n, timeout) -- luacheck: no unused args
 	return 0
 end
 
---- Requests at least `n` bytes from the underlying source. The reader will only return fewer than `n` bytes if the end of the stream has been reached. If the reader returns `0` bytes, it means that the end of the stream has been reached.
+--- Requests at least `n` bytes from the underlying source. The reader will only return fewer than `n` bytes if the
+--- end of the stream has been reached. If the reader returns `0` bytes, it means that the end of the stream has been
+--- reached.
 ---
---- The `timeout` parameter specifies the maximum amount of time (in milliseconds) that the reader should wait for data to become available. If the timeout is reached before any data is available, the reader should return an error message of `"timeout"`. The default for timeout is to wait indefinitely.
+--- The `timeout` parameter specifies the maximum amount of time (in milliseconds) that the reader should wait for data
+--- to become available. If the timeout is reached before any data is available, the reader should return an error
+--- message of `"timeout"`. The default for timeout is to wait indefinitely.
 --- @param n integer
 --- @param timeout? integer
 --- @return integer nread
@@ -121,12 +129,15 @@ function reader:readAtMost(n, timeout)
 	return self.buffer:read(n), err
 end
 
---- Reads bytes from the underlying source until the pattern `delim` is encountered. The returned data will not include `delim`.
+--- Reads bytes from the underlying source until the pattern `delim` is encountered. The returned data does not include
+--- the delimiter.
 ---
 --- If `max_size` is provided, the reader will return an error if `ch` is not encountered within the first `max_size`
 --- bytes.
 ---
---- If `delim` is a pattern that can match more than `#delim` characters, then `delim_lookbehind` must be provided to indicate how many bytes are required for the pattern to be fully matched. The reader will look this many bytes back from the end of the buffer when searching for `delim` after receiving new data.
+--- If `delim` is a pattern that can match more than `#delim` characters, then `delim_lookbehind` must be provided to
+--- indicate how many bytes are required for the pattern to be fully matched. The reader will look this many bytes back
+--- from the end of the buffer when searching for `delim` after receiving new data.
 --- @param delim string
 --- @param max_size? integer
 --- @param timeout? integer
@@ -167,7 +178,8 @@ end
 
 --- Reads all remaining bytes from the underlying source until the end of the stream is reached.
 ---
---- If `max_size` is provided, the reader will return an error if the end of the stream is not reached within the first `max_size` bytes.
+--- If `max_size` is provided, the reader will return an error if the end of the stream is not reached within the first
+--- `max_size` bytes.
 --- @param max_size? integer
 --- @param timeout? integer
 --- @return string|nil data

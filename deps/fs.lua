@@ -112,9 +112,9 @@ end
 ---
 --- If `mode` is provided, it is a table with the following fields:
 ---
---- * `excl`: If true, the operation will fail if `new_path` already exists.
---- * `ficlone`: If true, the operation will attempt to create a copy-on-write reflink. Will silently fall back to a normal copy.
---- * `ficlone_force`: If true, the operation will attempt to create a copy-on-write reflink. Will fail if the operation is not supported.
+--- * `excl`: The operation will fail if `new_path` already exists.
+--- * `ficlone`: The operation will create a copy-on-write reflink. Ignored if the operation is not supported.
+--- * `ficlone_force`: The operation will create a copy-on-write reflink. Fails if the operation is not supported.
 --- @param path string
 --- @param new_path string
 --- @param mode? { excl: boolean, ficlone: boolean, ficlone_force: boolean }
@@ -137,7 +137,7 @@ function fs.link(path, new_path)
 	return luv.fs_link(path, new_path)
 end
 
---- Returns information about the file at `path`. If `path` is a symbolic link, returns information about the link itself.
+--- Returns information about the file at `path`. If `path` is a symbolic link, returns information about the link.
 ---
 --- Equivalent to [`lstat(2)`](https://man7.org/linux/man-pages/man2/lstat.2.html) in Posix.
 --- @param path string
@@ -161,7 +161,7 @@ function fs.mkdir(path, mode)
 	return luv.fs_mkdir(path, normalize_mode(mode, fs.mode_directory))
 end
 
---- Creates a unique temporary directory with the given template. The last six characters of the template must be 'XXXXXX'.
+--- Creates a unique temporary directory with the given template. There template must end with `'XXXXXX'`.
 ---
 --- Equivalent to [`mkdtemp(3)`](https://man7.org/linux/man-pages/man3/mkdtemp.3.html) in Posix.
 --- @param template string
@@ -322,18 +322,28 @@ end
 ---
 --- The characters in `flags` have the following meanings:
 ---
---- * `r`: Open file for reading. The stream is positioned at the beginning of the file.
---- * `r+`: Open file for reading and writing. The stream is positioned at the beginning of the file.
---- * `rs`: Like `r` but write operations will operate synchronously, as if `fsync` was called after each write.
---- * `rs+`: Like `r+` but write operations will operate synchronously, as if `fsync` was called after each write.
---- * `w`: Open file for writing. The file is created if it does not exist or truncated. The stream is positioned at the beginning of the file.
---- * `w+`: Open file for reading and writing. The file is created if it does not exist or truncated. The stream is positioned at the beginning of the file.
---- * `wx`: Like `w` but fails if the path already exists.
---- * `wx+`: Like `w+` but fails if the path already exists.
---- * `a`: Open file for appending. The file is created if it does not exist. The stream is positioned at the end of the file.
---- * `a+`: Open file for reading and appending. The file is created if it does not exist. The stream is positioned at the end of the file.
---- * `ax`: Like `a` but fails if the path already exists.
---- * `ax+`: Like `a+` but fails if the path already exists.
+--- | Flags | Read | Write | Create | Truncate | Excl | Sync | Cursor |
+--- |-------|------|-------|--------|----------|------|------|--------|
+--- | `r`   | x    |       |        |          |      |      | Front  |
+--- | `r+`  | x    | x     |        |          |	  |      | Front  |
+--- | `rs`  | x    |       |        |          |      | x    | Front  |
+--- | `rs+` | x    | x     |        |          |      | x    | Front  |
+--- | `w`   |      | x     | x      | x        |      |      | Front  |
+--- | `w+`  | x    | x     | x      | x        |      |      | Front  |
+--- | `wx`  |      | x     | x      | x        | x    |      | Front  |
+--- | `wx+` | x    | x     | x      | x        | x    |      | Front  |
+--- | `a`   |      | x     | x      |          |      |      | End    |
+--- | `a+`  | x    | x     | x      |          |	  |      | End    |
+--- | `ax`  |      | x     | x      |          | x    |      | End    |
+--- | `ax+` | x    | x     | x      |          | x    |      | End    |
+---
+--- * Read: The file is opened for reading.
+--- * Write: The file is opened for writing.
+--- * Create: The file is created if it does not exist.
+--- * Truncate: The file is truncated to zero length if it already exists.
+--- * Excl: The operation fails if the file already exists.
+--- * Sync: Write operations will operate synchronously, as if `fsync` was called after each write.
+--- * Cursor: Whether the stream cursor is at the front or end of the file.
 ---
 --- If `mode` is a string, it is interpreted as octal digits.
 ---
@@ -446,7 +456,7 @@ function fs.futime(fd, atime, mtime)
 	return luv.fs_futime(fd, atime, mtime)
 end
 
---- Reads data from a file descriptor at the specified offset. It is not an error if the data is shorter than the requested size.
+--- Reads data from a file descriptor at the specified offset. It is not an error to return less than `size` bytes.
 ---
 --- Equivalent to [`pread(2)`](https://man7.org/linux/man-pages/man2/pread.2.html) in Posix.
 ---
@@ -570,12 +580,10 @@ end
 --- @return string|nil error
 --- @return string|nil errno
 function fs.writeFile(path, data, offset)
-	local flag = 0
+	local flag = O_WRONLY + O_CREAT
 	if offset == nil then
 		offset = 0
-		flag = O_WRONLY + O_CREAT + O_TRUNC
-	else
-		flag = O_WRONLY + O_CREAT
+		flag = flag + O_TRUNC
 	end
 
 	local fd, err, errno = fs.open(path, flag, '644')

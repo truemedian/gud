@@ -16,7 +16,7 @@ function reader_tls:init(reader_in, bio, ssl)
 	self.ssl = ssl
 end
 
-function reader_tls:fill(n, timeout)
+function reader_tls:fill(_, timeout)
 	while true do
 		local plain, ssl_err = self.ssl:read()
 

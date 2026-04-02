@@ -101,12 +101,12 @@ function base64.decode(data, alphabet)
 		local e = byte(data, i)
 		i = i + 1
 
-		if e == 0x0A or e == 0x0D then
-			-- skip newlines
-		elseif e == 0x3D then
+		if e == 0x3D then
 			-- padding character, stop processing
 			break
-		else
+		elseif e ~= 0x0A and e ~= 0x0D then
+			-- ignore newlines, but process all other characters
+
 			local v = map[e]
 			if not v then
 				-- invalid character, stop processing

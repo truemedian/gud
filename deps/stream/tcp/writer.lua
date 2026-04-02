@@ -20,13 +20,13 @@ end
 function writer_tcp:flush(timeout)
 	local parts = self.buffer:parts()
 
-	local nwritten, tw_err = self.socket:try_write(parts)
+	local nwritten_fast, tw_err = self.socket:try_write(parts)
 	if tw_err then
 		return 0, tw_err
 	end
 
-	if nwritten > 0 then
-		return nwritten
+	if nwritten_fast > 0 then
+		return nwritten_fast
 	end
 
 	local thread = coroutine.running()

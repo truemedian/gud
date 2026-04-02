@@ -17,7 +17,7 @@ function reader_tcp:init(socket)
 	self.timeout = timer()
 end
 
-function reader_tcp:fill(n, timeout)
+function reader_tcp:fill(_, timeout)
 	local thread = coroutine.running()
 	local done = false
 

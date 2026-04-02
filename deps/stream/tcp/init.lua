@@ -78,7 +78,7 @@ end
 --- @param command string
 --- @param ... any
 --- @return any
-function tcp:ioctl(command, ...)
+function tcp:ioctl(command, ...) -- luacheck: no unused args
 	if command == 'getpeername' then
 		return self.socket:getpeername()
 	end

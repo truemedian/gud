@@ -30,7 +30,7 @@ end
 --- @param timeout? integer
 --- @return integer nwritten
 --- @return string|nil err
-function writer:flush(timeout)
+function writer:flush(timeout) -- luacheck: no unused args
 	return 0, 'not implemented'
 end
 

@@ -9,10 +9,10 @@ local utility = require('utility')
 --- A simple timer utility for scheduling functions to be called after a delay or periodically.
 local timer = class('std.timer')
 
---- Start or restart the timer. If the timer is already running, it will be stopped and restarted with the new parameters.
+--- Start or restart the timer. If the timer is already running, it is stopped and restarted with the new parameters.
 ---
 --- @param delay number The initial delay in milliseconds before the timer first triggers.
---- @param interval number The interval in milliseconds for periodic triggering. If `0`, the timer will only trigger once.
+--- @param interval number The interval in milliseconds for periodic triggering. A value of `0` means never.
 --- @param callback fun(...: any) The function to call when the timer triggers.
 --- @param ... any Additional arguments to pass to the callback function.
 function timer:start(delay, interval, callback, ...)
@@ -49,7 +49,8 @@ function timer:stop()
 	end
 end
 
---- Restart the timer with the repeat interval as the initial delay. This is useful for periodic timers to reset the timer without changing the interval.
+--- Restart the timer with the repeat interval as the initial delay. This is useful for periodic timers to reset the
+--- timer without changing the interval.
 function timer:again()
 	if self.handle then
 		return assert(luv.timer_again(self.handle))

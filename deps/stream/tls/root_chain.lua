@@ -4,7 +4,7 @@ local root_chain = {}
 root_chain.store = openssl.x509.store:new()
 
 do
-	local content = module:load('ca-bundle.bin')
+	local content = module:load('ca-bundle.bin') -- luacheck: ignore
 
 	local i = 1
 	while i <= #content do
