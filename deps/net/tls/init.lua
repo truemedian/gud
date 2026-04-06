@@ -1,26 +1,26 @@
 local class = require('class')
 local openssl = require('openssl')
 
-local context = require('stream/tls/context')
+local context = require('net/tls/context')
 
-local reader = require('stream/tls/reader')
-local writer = require('stream/tls/writer')
+local reader = require('net/tls/reader')
+local writer = require('net/tls/writer')
 
---- @class std.stream.tls : std.stream
---- @field reader std.stream.tls.reader
---- @field writer std.stream.tls.writer
---- @field underlying std.stream
+--- @class std.net.tls : std.net.stream
+--- @field reader std.net.tls.reader
+--- @field writer std.net.tls.writer
+--- @field underlying std.net.stream
 --- @field ctx openssl.ssl.ctx
 --- @field ssl openssl.ssl
 --- @field bin openssl.bio
 --- @field bout openssl.bio
-local tls = class('std.stream.tls')
+local tls = class('std.net.tls')
 
 --- Perform a TLS handshake on the given stream, returning a new TLS stream on success.
---- @param stream std.stream
+--- @param stream std.net.stream
 --- @param options table
 --- @param timeout? integer
---- @return std.stream.tls|nil stream
+--- @return std.net.tls|nil stream
 --- @return string|nil err
 function tls.handshake(stream, options, timeout)
 	options = options or {}
@@ -47,13 +47,13 @@ function tls.handshake(stream, options, timeout)
 			return nil, write_err
 		end
 
-		local flushed, flush_err = self.enciphered.writer:flushAll(timeout)
+		local flushed, flush_err = self.underlying.writer:flushAll(timeout)
 		if not flushed then
 			return nil, flush_err
 		end
 
 		if ssl_err == 'want_read' then
-			local data, read_err = self.enciphered.reader:readAtLeast(1, timeout)
+			local data, read_err = self.underlying.reader:readAtLeast(1, timeout)
 			if not data or read_err then
 				return nil, read_err
 			end
@@ -135,10 +135,10 @@ function tls:shutdown(timeout)
 	self.underlying:shutdown()
 end
 
---- @class std.stream.tls.server : std.stream.server
---- @field underlying std.stream.server
+--- @class std.net.server.tls : std.net.server
+--- @field underlying std.net.server
 --- @field options table
-tls.server = class('std.stream.tls.server')
+tls.server = class('std.net.server.tls')
 
 function tls.server:init(server, options)
 	self.underlying = server
@@ -158,7 +158,7 @@ end
 
 --- Start listening for incoming connections.
 --- @param backlog? integer
---- @param callback fun(client: std.stream.tls)
+--- @param callback fun(client: std.net.tls)
 function tls.server:listen(backlog, callback)
 	return self.underlying:listen(backlog, function(stream)
 		local client, err = tls.handshake(stream, self.options, self.options.handshake_timeout)

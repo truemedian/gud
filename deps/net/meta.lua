@@ -1,15 +1,15 @@
 --- @meta
 
---- @class std.stream
+--- @class std.net.stream
 --- @field reader std.reader
 --- @field writer std.writer
---- @field close fun(stream: std.stream, timeout?: integer)
---- @field shutdown fun(stream: std.stream, timeout?: integer)
---- @field ioctl fun(stream: std.stream, command: string, ...): any
+--- @field close fun(stream: std.net.stream, timeout?: integer)
+--- @field shutdown fun(stream: std.net.stream, timeout?: integer)
+--- @field ioctl fun(stream: std.net.stream, command: string, ...): any
 
---- @class std.stream.server
---- @field bind fun(server: std.stream.server, ...)
---- @field listen fun(server: std.stream.server, backlog?: integer, callback: fun(client: std.stream))
+--- @class std.net.server
+--- @field bind fun(server: std.net.server, ...)
+--- @field listen fun(server: std.net.server, backlog?: integer, callback: fun(client: std.net.stream))
 
 --- @class openssl.x509 : userdata
 --- @field class 'openssl.x509'

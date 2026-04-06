@@ -6,10 +6,10 @@ local reader = require('reader')
 local timer = require('timer')
 local utility = require('utility')
 
---- @class std.stream.tcp.reader : std.reader
+--- @class std.net.tcp.reader : std.reader
 --- @field socket uv_tcp_t
 --- @field timeout std.timer
-local reader_tcp = class('stream.tcp.reader', reader)
+local reader_tcp = class('std.net.tcp.reader', reader)
 
 function reader_tcp:init(socket)
 	reader.init(self)

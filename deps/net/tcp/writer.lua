@@ -6,10 +6,10 @@ local writer = require('writer')
 local timer = require('timer')
 local utility = require('utility')
 
---- @class std.stream.tcp.writer : std.writer
+--- @class std.net.tcp.writer : std.writer
 --- @field socket uv_tcp_t
 --- @field timeout std.timer
-local writer_tcp = class('stream.tcp.writer', writer)
+local writer_tcp = class('std.net.tcp.writer', writer)
 
 function writer_tcp:init(socket)
 	writer.init(self)
@@ -19,15 +19,6 @@ end
 
 function writer_tcp:flush(timeout)
 	local parts = self.buffer:parts()
-
-	local nwritten_fast, tw_err = self.socket:try_write(parts)
-	if tw_err then
-		return 0, tw_err
-	end
-
-	if nwritten_fast > 0 then
-		return nwritten_fast
-	end
 
 	local thread = coroutine.running()
 	local pending = #self.buffer

@@ -1,7 +1,7 @@
 local bit = require('bit')
 local openssl = require('openssl')
 
-local root_chain = require('stream/tls/root_chain')
+local root_chain = require('net/tls/root_chain')
 
 local disable_bad_tls = bit.bor(openssl.ssl.no_sslv2, openssl.ssl.no_sslv3, openssl.ssl.no_compression)
 

@@ -3,22 +3,46 @@ local luv = require('luv')
 
 local await = require('await')
 
-local reader = require('stream/tcp/reader')
-local writer = require('stream/tcp/writer')
+local reader = require('net/tcp/reader')
+local writer = require('net/tcp/writer')
 
---- @class std.stream.tcp : std.stream
---- @field reader std.stream.tcp.reader
---- @field writer std.stream.tcp.writer
-local tcp = class('std.stream.tcp')
+--- @class std.net.tcp : std.net.stream
+--- @field reader std.net.tcp.reader
+--- @field writer std.net.tcp.writer
+local tcp = class('std.net.tcp')
 
 local default_hints = { protocol = 6 }
+
+--- Connect to a TCP server at the specified address.
+---
+--- @param address { addr: string, port: integer }
+--- @return std.net.tcp|nil stream
+--- @return string|nil err
+function tcp.connectTo(address)
+	local socket, socket_err = luv.new_tcp()
+	if not socket then
+		return nil, socket_err
+	end
+
+	local awaiter = await()
+	local connect_ok, connect_err = socket:connect(address.addr, address.port, awaiter:callback())
+	if connect_ok then
+		local connect_fail = awaiter:wait()
+		if not connect_fail then
+			return tcp(socket, address)
+		end
+	end
+
+	socket:close()
+	return nil, connect_err
+end
 
 --- Connect to a TCP server.
 ---
 --- @param host string|nil
 --- @param service string|nil
 --- @param hints? uv.aliases.getaddrinfo_hint
---- @return std.stream.tcp|nil stream
+--- @return std.net.tcp|nil stream
 --- @return string|nil err
 function tcp.connect(host, service, hints)
 	assert(host == nil or type(host) == 'string', 'host must be a string or nil')
@@ -44,31 +68,23 @@ function tcp.connect(host, service, hints)
 		return nil, resolve_err
 	end
 
-	local connect_ok, connect_err
+	local stream, connect_err
 	for _, address in ipairs(addresses) do
-		local socket, socket_err = luv.new_tcp()
-		if not socket then
-			return nil, socket_err
-		end
+		stream, connect_err = tcp.connectTo(address)
 
-		connect_ok, connect_err = socket:connect(address.addr, address.port, awaiter:callback())
-		if connect_ok then
-			local err5 = awaiter:wait()
-			if not err5 then
-				return tcp(socket)
-			end
+		if stream then
+			return stream, nil
 		end
-
-		socket:close()
 	end
 
 	return nil, connect_err
 end
 
-function tcp:init(socket)
+function tcp:init(socket, address)
 	self.reader = reader(socket)
 	self.writer = writer(socket)
 	self.socket = socket
+	self.address = address
 end
 
 --- Performs an implementation specific control operation on the underlying stream.
@@ -105,9 +121,9 @@ function tcp:shutdown(timeout)
 	self.socket:shutdown()
 end
 
---- @class std.stream.tcp.server : std.stream.server
+--- @class std.net.server.tcp : std.net.server
 --- @field socket uv_tcp_t
-tcp.server = class('std.stream.tcp.server')
+tcp.server = class('std.net.server.tcp')
 
 --- @param family? string|integer
 function tcp.server:init(family)
@@ -124,7 +140,7 @@ end
 
 --- Start listening for incoming connections.
 --- @param backlog? integer
---- @param callback fun(client: std.stream.tcp)
+--- @param callback fun(client: std.net.tcp)
 function tcp.server:listen(backlog, callback)
 	return assert(self.socket:listen(backlog or 256, function(err)
 		assert(not err, err)

@@ -3,11 +3,11 @@ local class = require('class')
 --- @type std.writer
 local writer = require('writer')
 
---- @class std.stream.tls.writer : std.writer
+--- @class std.net.tls.writer : std.writer
 --- @field writer std.writer
 --- @field bio openssl.bio
 --- @field ssl openssl.ssl
-local writer_tls = class('stream.tls.writer', writer)
+local writer_tls = class('std.net.tls.writer', writer)
 
 function writer_tls:init(writer_out, bio, ssl)
 	writer.init(self)
