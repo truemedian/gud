@@ -53,7 +53,7 @@ function reader:fillAtLeast(n, timeout)
 		if err then
 			return total, err
 		elseif nread == 0 then
-			self.eof = true
+			self.eof = err ~= 'timeout'
 			return total
 		end
 
@@ -129,8 +129,7 @@ function reader:readAtMost(n, timeout)
 	return self.buffer:read(n), err
 end
 
---- Reads bytes from the underlying source until the pattern `delim` is encountered. The returned data does not include
---- the delimiter.
+--- Reads bytes from the underlying source until the pattern `delim` is encountered.
 ---
 --- If `max_size` is provided, the reader will return an error if `ch` is not encountered within the first `max_size`
 --- bytes.
@@ -158,7 +157,7 @@ function reader:readUntil(delim, max_size, timeout, delim_lookbehind)
 
 		if i and j then
 			self.buffer:skip(j)
-			return data:sub(1, i - 1)
+			return data:sub(1, j)
 		end
 
 		if err then

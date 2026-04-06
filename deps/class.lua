@@ -34,6 +34,17 @@ function class.new(name, base)
 	return setmetatable(cls, class_meta)
 end
 
+function class.isinstanceof(obj, cls)
+	local obj_cls = getmetatable(obj)
+	while obj_cls do
+		if obj_cls == cls then
+			return true
+		end
+		obj_cls = obj_cls.__base
+	end
+	return false
+end
+
 return setmetatable(class, {
 	__call = function(_, ...)
 		return class.new(...)
