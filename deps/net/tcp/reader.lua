@@ -7,32 +7,37 @@ local timer = require('timer')
 local utility = require('utility')
 
 --- @class std.net.tcp.reader : std.reader
---- @field socket uv_tcp_t
+--- @field socket uv.uv_tcp_t
 --- @field timeout std.timer
+--- @field waiting thread
+--- @field _onread fun(err: string?, chunk: string?)
+--- @field _ontimeout fun()
 local reader_tcp = class('std.net.tcp.reader', reader)
 
 function reader_tcp:init(socket)
 	reader.init(self)
 	self.socket = socket
 	self.timeout = timer()
-end
+	self.waiting = nil
 
-function reader_tcp:fill(_, timeout)
-	local thread = coroutine.running()
-	local done = false
+	local function finish(n, err)
+		if self.waiting then
+			self.timeout:stop()
 
-	local function finish(nread, err)
-		if done then
-			return
+			local waiting = self.waiting
+			self.waiting = nil
+			return utility.assertresume(waiting, n, err)
 		end
 
-		done = true
-		self.timeout:stop()
-		self.socket:read_stop()
-		return utility.assertresume(thread, nread, err)
+		if err then
+			self.closed = true
+		elseif #self.buffer > 8192 then
+			-- wait for the buffer to be consumed before reading more data
+			return self.socket:read_stop()
+		end
 	end
 
-	self.socket:read_start(function(err, chunk)
+	function self._onread(err, chunk)
 		if err then
 			self.socket:close()
 			return finish(0, err)
@@ -42,14 +47,31 @@ function reader_tcp:fill(_, timeout)
 
 		self.buffer:write(chunk)
 		return finish(#chunk)
-	end)
+	end
+
+	function self._ontimeout()
+		self.socket:read_stop()
+		self.socket:close()
+
+		local waiting = assert(self.waiting)
+		self.waiting = nil
+		return utility.assertresume(waiting, 0, 'timeout')
+	end
+end
+
+function reader_tcp:fill(_, timeout)
+	local thread = coroutine.running()
 
 	if timeout then
-		self.timeout:delayed(timeout, function()
-			self.socket:close()
-			return finish(0, 'timeout')
-		end)
+		self.timeout:delayed(timeout, self._ontimeout)
 	end
+
+	if self.waiting then
+		return 0, 'already waiting'
+	end
+
+	self.waiting = thread
+	self.socket:read_start(self._onread)
 
 	return coroutine.yield()
 end

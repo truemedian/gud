@@ -41,7 +41,7 @@ end
 ---
 --- @param host string|nil
 --- @param service string|nil
---- @param hints? uv.aliases.getaddrinfo_hint
+--- @param hints? uv.getaddrinfo.hints
 --- @return std.net.tcp|nil stream
 --- @return string|nil err
 function tcp.connect(host, service, hints)
@@ -107,9 +107,12 @@ end
 function tcp:close(timeout)
 	self.writer:flushAll(timeout)
 
-	self.reader.eof = true
+	self.reader.closed = true
 	self.writer.closed = true
-	self.socket:close()
+
+	if not self.socket:is_closing() then
+		self.socket:close()
+	end
 end
 
 --- Shutdown the TCP connection, disallowing further writes.
@@ -122,7 +125,7 @@ function tcp:shutdown(timeout)
 end
 
 --- @class std.net.server.tcp : std.net.server
---- @field socket uv_tcp_t
+--- @field socket uv.uv_tcp_t
 tcp.server = class('std.net.server.tcp')
 
 --- @param family? string|integer

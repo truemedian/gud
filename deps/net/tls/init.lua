@@ -121,7 +121,7 @@ end
 function tls:close(timeout)
 	self.writer:flushAll(timeout)
 
-	self.reader.eof = true
+	self.reader.closed = true
 	self.writer.closed = true
 	self.underlying:close()
 end

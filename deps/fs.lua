@@ -8,54 +8,24 @@ local O_TRUNC = luv.constants.O_TRUNC
 
 --- @class fd_t : integer
 
---- @class std.fs.timeval
---- @field sec integer
---- @field nsec integer
-
---- @class std.fs.stat_info
---- @field dev integer
---- @field mode integer
---- @field nlink integer
---- @field uid integer
---- @field gid integer
---- @field rdev integer
---- @field ino integer
---- @field size integer
---- @field blksize integer
---- @field blocks integer
---- @field flags integer
---- @field gen integer
---- @field atime std.fs.timeval
---- @field mtime std.fs.timeval
---- @field ctime std.fs.timeval
---- @field birthtime std.fs.timeval
---- @field type string
-
---- @class std.fs.statfs_info
---- @field type integer
---- @field bsize integer
---- @field blocks integer
---- @field bfree integer
---- @field bavail integer
---- @field files integer
---- @field ffree integer
-
 --- @class std.fs
 local fs = {}
 
 --- @param mode integer|string|nil
 --- @param default_mode? integer
---- @return integer|nil
+--- @return integer
 local function normalize_mode(mode, default_mode)
-	if mode == nil then
+	if mode == nil and default_mode then
 		return default_mode
 	end
 
-	if type(mode) == 'string' then
+	if type(mode) == 'number' then
+		return mode
+	elseif type(mode) == 'string' then
 		return tonumber(mode, 8)
 	end
 
-	return mode
+	error('invalid mode')
 end
 
 --- The default permissions for a new directory.
@@ -141,7 +111,7 @@ end
 ---
 --- Equivalent to [`lstat(2)`](https://man7.org/linux/man-pages/man2/lstat.2.html) in Posix.
 --- @param path string
---- @return std.fs.stat_info|nil info
+--- @return uv.fs_stat.result|nil info
 --- @return string|nil error
 --- @return string|nil errno
 --- @nodiscard
@@ -248,7 +218,7 @@ end
 --- Equivalent to [`scandir(3)`](https://man7.org/linux/man-pages/man3/scandir.3.html) in Posix.
 --- @param path string
 --- @return (fun(): string|nil, string)|nil iterator
---- @return uv_fs_t|string state
+--- @return uv.uv_fs_t|string|nil state
 --- @return string|nil errno
 --- @nodiscard
 function fs.scandir(path)
@@ -264,7 +234,7 @@ end
 ---
 --- Equivalent to [`stat(2)`](https://man7.org/linux/man-pages/man2/stat.2.html) in Posix.
 --- @param path string
---- @return std.fs.stat_info|nil info
+--- @return uv.fs_stat.result|nil info
 --- @return string|nil error
 --- @return string|nil errno
 --- @nodiscard
@@ -356,6 +326,7 @@ end
 --- @return string|nil errno
 --- @nodiscard
 function fs.open(path, flags, mode)
+	---@diagnostic disable-next-line: return-type-mismatch
 	return luv.fs_open(path, flags, normalize_mode(mode, fs.mode_file))
 end
 
@@ -381,6 +352,7 @@ end
 --- @return string|nil error
 --- @return string|nil errno
 function fs.fchmod(fd, mode)
+	---@diagnostic disable-next-line: return-type-mismatch
 	return luv.fs_fchmod(fd, normalize_mode(mode))
 end
 
@@ -412,7 +384,7 @@ end
 ---
 --- Equivalent to [`fstat(2)`](https://man7.org/linux/man-pages/man2/fstat.2.html) in Posix.
 --- @param fd fd_t
---- @return std.fs.stat_info|nil info
+--- @return uv.fs_stat.result|nil info
 --- @return string|nil error
 --- @return string|nil errno
 --- @nodiscard

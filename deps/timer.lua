@@ -4,7 +4,7 @@ local luv = require('luv')
 local utility = require('utility')
 
 --- @class std.timer
---- @field private handle uv_timer_t
+--- @field private handle uv.uv_timer_t
 ---
 --- A simple timer utility for scheduling functions to be called after a delay or periodically.
 local timer = class('std.timer')

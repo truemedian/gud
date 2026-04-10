@@ -329,9 +329,7 @@ end
 
 --- Clears all buffered data.
 function buffer:clear()
-	for i = self.head, self.tail - 1 do
-		self.chunks[i] = nil
-	end
+	table.clear(self.chunks)
 
 	self.head = 1
 	self.tail = 1

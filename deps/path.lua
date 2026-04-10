@@ -5,6 +5,8 @@ local concat = table.concat
 local max = math.max
 
 --- @class std.path
+--- @field posix std.path.posix
+--- @field windows std.path.windows
 local path = {}
 
 --- @class std.path.posix
