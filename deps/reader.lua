@@ -5,12 +5,29 @@ local byte, find = string.byte, string.find
 local max = math.max
 
 --- @class std.reader
---- @field eof boolean Indicates whether or not the end of the stream has been reached.
+--- @field closed boolean Indicates whether or not the reader has been closed / reached the end of the stream.
 --- @field buffer std.buffer Buffer for storing data read from the underlying source.
 local reader = class('std.reader')
 
+--- Creates a new reader that is pre-filled with the given string.
+--- @param str string
+--- @return std.reader
+function reader.fixed(str)
+	local r = reader()
+	r.buffer:write(str)
+	return r
+end
+
+--- Creates a new reader that is already at the end of the stream.
+--- @return std.reader
+function reader.empty()
+	local r = reader()
+	r.closed = true
+	return r
+end
+
 function reader:init()
-	self.eof = false
+	self.closed = false
 	self.buffer = buffer()
 end
 
@@ -43,7 +60,7 @@ end
 --- @return integer nread
 --- @return string|nil err
 function reader:fillAtLeast(n, timeout)
-	if self.eof then
+	if self.closed then
 		return 0
 	end
 
@@ -53,7 +70,7 @@ function reader:fillAtLeast(n, timeout)
 		if err then
 			return total, err
 		elseif nread == 0 then
-			self.eof = err ~= 'timeout'
+			self.closed = err ~= 'timeout'
 			return total
 		end
 
@@ -156,6 +173,10 @@ function reader:readUntil(delim, max_size, timeout, delim_lookbehind)
 		local i, j = find(data, delim, last_index)
 
 		if i and j then
+			if j > max_size then
+				return nil, 'max size exceeded'
+			end
+
 			self.buffer:skip(j)
 			return data:sub(1, j)
 		end
