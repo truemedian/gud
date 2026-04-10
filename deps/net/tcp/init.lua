@@ -2,6 +2,7 @@ local class = require('class')
 local luv = require('luv')
 
 local await = require('await')
+local net = require('net')
 
 local reader = require('net/tcp/reader')
 local writer = require('net/tcp/writer')
@@ -9,9 +10,18 @@ local writer = require('net/tcp/writer')
 --- @class std.net.tcp : std.net.stream
 --- @field reader std.net.tcp.reader
 --- @field writer std.net.tcp.writer
+--- @field socket uv.uv_tcp_t
 local tcp = class('std.net.tcp')
 
-local default_hints = { protocol = 6 }
+--- Resolve one or more TCP endpoints.
+--- @param host string|nil
+--- @param service string|nil
+--- @param hints? uv.getaddrinfo.hints
+--- @return table[]|nil addresses
+--- @return string|nil err
+function tcp.resolve(host, service, hints)
+	return net.resolve(host, service, hints, 6)
+end
 
 --- Connect to a TCP server at the specified address.
 ---
@@ -29,7 +39,7 @@ function tcp.connectTo(address)
 	if connect_ok then
 		local connect_fail = awaiter:wait()
 		if not connect_fail then
-			return tcp(socket, address)
+			return tcp(socket)
 		end
 	end
 
@@ -45,27 +55,11 @@ end
 --- @return std.net.tcp|nil stream
 --- @return string|nil err
 function tcp.connect(host, service, hints)
-	assert(host == nil or type(host) == 'string', 'host must be a string or nil')
-	assert(service == nil or type(service) == 'string', 'service must be a string or nil')
-	assert(hints == nil or type(hints) == 'table', 'hints must be a table or nil')
-	assert(host ~= nil or service ~= nil, 'either host or service must be provided')
-
-	if hints then
-		---@diagnostic disable-next-line: assign-type-mismatch
-		hints.protocol = hints.protocol or 6
-	else
-		hints = default_hints
-	end
-
-	local awaiter = await()
-	local addr_ok, getaddrinfo_err = luv.getaddrinfo(host, service, hints, awaiter:callback())
-	if not addr_ok then
-		return nil, getaddrinfo_err
-	end
-
-	local resolve_err, addresses = awaiter:wait()
+	local addresses, resolve_err = tcp.resolve(host, service, hints)
 	if resolve_err then
 		return nil, resolve_err
+	elseif not addresses then
+		return nil, 'no addresses found'
 	end
 
 	local stream, connect_err
@@ -80,23 +74,25 @@ function tcp.connect(host, service, hints)
 	return nil, connect_err
 end
 
-function tcp:init(socket, address)
+function tcp:init(socket)
 	self.reader = reader(socket)
 	self.writer = writer(socket)
 	self.socket = socket
-	self.address = address
 end
 
 --- Performs an implementation specific control operation on the underlying stream.
 ---
 --- The following commands are supported:
 --- - 'getpeername': returns the remote address and port as a table with `address` and `port` fields.
+--- - 'getsockname': returns the local address and port as a table with `address` and `port` fields.
 --- @param command string
 --- @param ... any
 --- @return any
 function tcp:ioctl(command, ...) -- luacheck: no unused args
 	if command == 'getpeername' then
 		return self.socket:getpeername()
+	elseif command == 'getsockname' then
+		return self.socket:getsockname()
 	end
 
 	error('unsupported ioctl command: ' .. tostring(command))

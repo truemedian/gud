@@ -97,7 +97,7 @@ function reader:readExact(n, timeout)
 	local needed = n - available
 	local new, err = self:fillAtLeast(needed, timeout)
 	if new < needed then
-		return nil, 'end of stream'
+		return nil, 'closed'
 	end
 
 	return self.buffer:read(n), err
@@ -119,7 +119,7 @@ function reader:readAtLeast(n, timeout)
 	local needed = n - available
 	local new, err = self:fillAtLeast(needed, timeout)
 	if new < needed then
-		return nil, 'end of stream'
+		return nil, 'closed'
 	end
 
 	return self.buffer:read(), err
@@ -140,7 +140,7 @@ function reader:readAtMost(n, timeout)
 
 	local new, err = self:fillAtLeast(1, timeout)
 	if new < 1 then
-		return nil, 'end of stream'
+		return nil, 'closed'
 	end
 
 	return self.buffer:read(n), err
@@ -189,7 +189,7 @@ function reader:readUntil(delim, max_size, timeout, delim_lookbehind)
 
 		new, err = self:fillAtLeast(1, timeout)
 		if new < 1 then
-			return nil, 'end of stream'
+			return nil, 'closed'
 		end
 
 		last_index = max(#data - delim_lookbehind, 1)

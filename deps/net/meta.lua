@@ -1,11 +1,13 @@
 --- @meta
 
---- @class std.net.stream
+--- @class std.net.socket
+--- @field close fun(stream: std.net.socket, timeout?: integer)
+--- @field ioctl fun(stream: std.net.socket, command: string, ...): any
+
+--- @class std.net.stream : std.net.socket
 --- @field reader std.reader
 --- @field writer std.writer
---- @field close fun(stream: std.net.stream, timeout?: integer)
 --- @field shutdown fun(stream: std.net.stream, timeout?: integer)
---- @field ioctl fun(stream: std.net.stream, command: string, ...): any
 
 --- @class std.net.server
 --- @field bind fun(server: std.net.server, ...)

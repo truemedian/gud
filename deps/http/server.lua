@@ -34,7 +34,7 @@ local function handle_connection(stream, callback, options, errf)
 	while true do
 		local waited, err = request:wait(max_head_size, timeout)
 		if not waited then
-			if err == 'end of stream' then
+			if err == 'closed' then
 				stream:close()
 				return
 			end

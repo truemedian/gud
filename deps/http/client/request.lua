@@ -23,7 +23,6 @@ end
 --- @field version string|nil
 --- @field headers std.http.headers
 --- @field writer std.writer|std.http.writer.chunked|std.http.writer.length|nil
---- @field writer_kind 'stream'|'chunked'|'length'|nil
 local client_request = class('std.http.client.request')
 
 function client_request:init(stream)
@@ -34,7 +33,6 @@ function client_request:init(stream)
 	self.target = nil
 	self.version = nil
 	self.writer = nil
-	self.writer_kind = nil
 end
 
 function client_request:reset()
@@ -45,7 +43,6 @@ function client_request:reset()
 	self.target = nil
 	self.version = nil
 	self.writer = nil
-	self.writer_kind = nil
 
 	for name in pairs(self.headers.fields) do
 		self.headers.fields[name] = nil
@@ -115,13 +112,10 @@ function client_request:start(method, target, version, timeout)
 
 	if is_chunked then
 		self.writer = protocol.chunked_writer(self.stream.writer)
-		self.writer_kind = 'chunked'
 	elseif content_length then
 		self.writer = protocol.length_writer(self.stream.writer, content_length)
-		self.writer_kind = 'length'
 	else
 		self.writer = self.stream.writer
-		self.writer_kind = 'stream'
 	end
 
 	return self.stream.writer:flushAll(timeout)
