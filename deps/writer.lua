@@ -11,6 +11,14 @@ local floor = math.floor
 --- @field corked boolean
 local writer = class('std.writer')
 
+--- Creates an empty writer.
+--- @return std.writer
+function writer.empty()
+	local result = writer()
+	result.closed = true
+	return result
+end
+
 function writer:init()
 	self.closed = false
 	self.buffer = buffer()
@@ -50,17 +58,22 @@ function writer:flushAll(timeout)
 		return true
 	end
 
+	if self.closed then
+		return false, 'closed'
+	end
+
 	while true do
 		local nwritten, err = self:flush(timeout)
 		if nwritten == total then
 			self.buffer:clear()
 			return true, err
 		elseif err then
+			self.closed = self.closed or err ~= 'timeout'
 			return false, err
 		elseif nwritten == 0 then
 			self.closed = true
 			self.buffer:clear()
-			return false, 'stream closed'
+			return false, 'closed'
 		end
 
 		if nwritten > 0 then
