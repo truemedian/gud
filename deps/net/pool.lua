@@ -12,7 +12,7 @@ local tls = require('net/tls')
 local pool = class('std.net.pool')
 
 local function is_stream_reusable(stream)
-	if stream.reader.eof then
+	if stream.reader.closed then
 		return false
 	elseif stream.writer.closed then
 		return false
@@ -160,5 +160,8 @@ function pool:close()
 
 	self.connections = {}
 end
+
+--- @type std.net.pool
+pool.global = pool()
 
 return pool
