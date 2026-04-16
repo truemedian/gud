@@ -83,6 +83,27 @@ function writer:flushAll(timeout)
 	end
 end
 
+--- Flushes all buffered data, and then calls `flushAll` recursively down any underlying writers. This is useful for ensuring that all data is flushed through a chain of writers.
+--- @param timeout? integer
+--- @return boolean
+function writer:flushAllRecursive(timeout)
+	return self:flushAll(timeout)
+end
+
+--- Flushes any remaining data and prevents any further writes to the stream.
+--- @param timeout? integer
+--- @return boolean success
+--- @return string|nil err
+function writer:finish(timeout)
+	if self.closed then
+		return false, 'closed'
+	end
+
+	local ok, err = self:flushAll(timeout)
+	self.closed = true
+	return ok, err
+end
+
 --- Enqueues data for writing.
 --- @param data string
 --- @param timeout? integer

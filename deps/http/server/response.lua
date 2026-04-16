@@ -144,7 +144,7 @@ function server_response:finish(timeout)
 			return false, err
 		end
 	else
-		local ok, err = self.writer:flushAll(timeout)
+		local ok, err = self.writer:flushAllRecursive(timeout)
 		if not ok then
 			return false, err
 		end

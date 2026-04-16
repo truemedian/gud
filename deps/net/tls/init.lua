@@ -119,7 +119,7 @@ end
 --- Close the TLS connection, disallowing further reads and writes.
 --- @param timeout? integer
 function tls:close(timeout)
-	self.writer:flushAll(timeout)
+	self.writer:flushAllRecursive(timeout)
 
 	self.reader.closed = true
 	self.writer.closed = true
@@ -129,7 +129,7 @@ end
 --- Shutdown the TLS connection, disallowing further writes.
 --- @param timeout? integer
 function tls:shutdown(timeout)
-	self.writer:flushAll(timeout)
+	self.writer:flushAllRecursive(timeout)
 
 	self.writer.closed = true
 	self.underlying:shutdown()

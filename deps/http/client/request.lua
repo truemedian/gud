@@ -151,7 +151,7 @@ function client_request:finish(timeout)
 	elseif self.writer.finish then
 		ok, err = self.writer:finish(timeout)
 	else
-		ok, err = self.writer:flushAll(timeout)
+		ok, err = self.writer:flushAllRecursive(timeout)
 	end
 
 	if not ok then

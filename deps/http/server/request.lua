@@ -143,7 +143,7 @@ function server_request:continue(timeout)
 	end
 
 	self.expect_continue = false
-	return self.stream.writer:flushAll(timeout)
+	return self.stream.writer:flushAllRecursive(timeout)
 end
 
 return server_request

@@ -366,7 +366,7 @@ function chunked_writer:finish(timeout)
 	end
 
 	self.closed = true
-	return self.underlying:flushAll(timeout)
+	return self.underlying:flushAllRecursive(timeout)
 end
 
 --- @class std.http.writer.length : std.writer
@@ -415,7 +415,7 @@ function length_writer:finish(timeout)
 	end
 
 	self.closed = true
-	return self.underlying:flushAll(timeout)
+	return self.underlying:flushAllRecursive(timeout)
 end
 
 local status_reasons = {

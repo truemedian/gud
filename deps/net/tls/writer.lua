@@ -35,14 +35,13 @@ function writer_tls:flush(timeout)
 end
 
 --- @param timeout? integer
-function writer_tls:flushAll(timeout)
+function writer_tls:flushAllRecursive(timeout)
 	local success, err = writer.flushAll(self, timeout)
 	if not success then
 		return false, err
 	end
 
-	success, err = self.writer:flushAll(timeout)
-	return success, err
+	return self.writer:flushAllRecursive(timeout)
 end
 
 return writer_tls
