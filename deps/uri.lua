@@ -18,9 +18,15 @@ local function percent_encode(c)
 end
 
 --- @param str string
+--- @param space string|nil
 --- @return string
-function uri.percentEncode(str)
-	return (str:gsub('([^A-Za-z0-9._~-])', percent_encode))
+function uri.percentEncode(str, space)
+	local encoded = str:gsub('([^A-Za-z0-9._~-])', percent_encode)
+	if space then
+		encoded = encoded:gsub('%20', space)
+	end
+
+	return encoded
 end
 
 local function percent_decode(hex)
@@ -28,9 +34,15 @@ local function percent_decode(hex)
 end
 
 --- @param str string
+--- @param space string|nil
 --- @return string
-function uri.percentDecode(str)
-	return (str:gsub('%%(%x%x)', percent_decode))
+function uri.percentDecode(str, space)
+	local decoded = str:gsub('%%(%x%x)', percent_decode)
+	if space then
+		decoded = decoded:gsub(space, ' ')
+	end
+
+	return decoded
 end
 
 local grammar = re.compile(
