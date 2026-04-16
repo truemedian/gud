@@ -1,5 +1,7 @@
 local luv = require('luv')
 
+local dirname = require('path').dirname
+
 local tonumber, type = tonumber, type
 local concat, max = table.concat, math.max
 local O_WRONLY = luv.constants.O_WRONLY
@@ -123,7 +125,7 @@ end
 ---
 --- Equivalent to [`mkdir(2)`](https://man7.org/linux/man-pages/man2/mkdir.2.html) in Posix.
 --- @param path string
---- @param mode? integer
+--- @param mode? integer|string
 --- @return boolean|nil success
 --- @return string|nil error
 --- @return string|nil errno
@@ -584,6 +586,49 @@ function fs.writeFile(path, data, offset)
 	end
 
 	fs.close(fd)
+	return true
+end
+
+--- @param path string
+--- @param mode? integer|string
+--- @return boolean
+--- @return string|nil
+--- @return string|nil
+function fs.mkdirp(path, mode)
+	local success, errmsg, errno = fs.mkdir(path, mode)
+	if success then
+		return true
+	elseif errno == 'EEXIST' then
+		local stat = fs.stat(path)
+		if not stat then
+			return false, errmsg, errno
+		elseif stat.type ~= 'directory' then
+			return false, 'ENOTDIR: a component of the path exists and is not a directory', 'ENOTDIR'
+		end
+
+		return true
+	elseif errno ~= 'ENOENT' then
+		return false, errmsg, errno
+	end
+
+	local parent = dirname(path)
+	success, errmsg, errno = fs.mkdirp(parent, mode)
+	if not success then
+		return false, errmsg, errno
+	end
+
+	success, errmsg, errno = fs.mkdir(path, mode)
+	if not success then
+		return false, errmsg, errno
+	elseif errno == 'EEXIST' then
+		local stat = fs.stat(path)
+		if not stat then
+			return false, errmsg, errno
+		elseif stat.type ~= 'directory' then
+			return false, 'ENOTDIR: a component of the path exists and is not a directory', 'ENOTDIR'
+		end
+	end
+
 	return true
 end
 
