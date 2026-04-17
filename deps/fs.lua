@@ -7,6 +7,8 @@ local concat, max = table.concat, math.max
 local O_WRONLY = luv.constants.O_WRONLY
 local O_CREAT = luv.constants.O_CREAT
 local O_TRUNC = luv.constants.O_TRUNC
+local O_EXCL = luv.constants.O_EXCL
+local F_OK = luv.constants.F_OK
 
 --- @class fd_t : integer
 
@@ -219,7 +221,7 @@ end
 ---
 --- Equivalent to [`scandir(3)`](https://man7.org/linux/man-pages/man3/scandir.3.html) in Posix.
 --- @param path string
---- @return (fun(): string|nil, string)|nil iterator
+--- @return (fun(): name: string|nil, kind: string)|nil iterator
 --- @return uv.uv_fs_t|string|nil state
 --- @return string|nil errno
 --- @nodiscard
@@ -341,6 +343,16 @@ end
 --- @return string|nil errno
 function fs.close(fd)
 	return luv.fs_close(fd)
+end
+
+--- Creates a unique temporary file with the given template. There template must end with `'XXXXXX'`.
+--- Equivalent to [`mkstemp(3)`](https://man7.org/linux/man-pages/man3/mkstemp.3.html) in Posix.
+--- @param template string
+--- @return fd_t|nil file_descriptor
+--- @return string|nil temp_path
+--- @return string|nil error
+function fs.mkstemp(template)
+	return luv.fs_mkstemp(template)
 end
 
 --- Changes the permissions of the file descriptor.
@@ -486,11 +498,11 @@ end
 --- @return boolean exists
 --- @nodiscard
 function fs.exists(path)
-	return fs.stat(path) ~= nil
+	return fs.access(path, F_OK) == true
 end
 
 --- Reads an entire file and returns its contents.
---- @param path string
+--- @param path string|fd_t
 --- @param size? integer
 --- @param offset? integer
 --- @return string|nil data
@@ -498,9 +510,16 @@ end
 --- @return string|nil errno
 --- @nodiscard
 function fs.readFile(path, size, offset)
-	local fd, err, errno = fs.open(path, 'r')
-	if fd == nil then
-		return nil, err, errno
+	local fd, err, errno
+	if type(path) == 'number' then
+		fd = path
+	elseif type(path) == 'string' then
+		fd, err, errno = fs.open(path, 'r')
+		if fd == nil then
+			return nil, err, errno
+		end
+	else
+		return nil, 'EINVAL: path must be a string or file descriptor', 'EINVAL'
 	end
 
 	if size == nil then
@@ -547,22 +566,35 @@ end
 ---
 --- If offset is provided, the file is not truncated and the data is written at the offset.
 --- @async
---- @param path string
+--- @param path string|fd_t
 --- @param data string
 --- @param offset? integer
---- @return boolean|nil success
+--- @param excl? boolean
+--- @return boolean success
 --- @return string|nil error
 --- @return string|nil errno
-function fs.writeFile(path, data, offset)
-	local flag = O_WRONLY + O_CREAT
-	if offset == nil then
-		offset = 0
-		flag = flag + O_TRUNC
-	end
+function fs.writeFile(path, data, offset, excl)
+	local fd, err, errno
 
-	local fd, err, errno = fs.open(path, flag, '644')
-	if fd == nil then
-		return nil, err, errno
+	if type(path) == 'number' then
+		fd = path
+	elseif type(path) == 'string' then
+		local flag = O_WRONLY + O_CREAT
+		if offset == nil then
+			offset = 0
+			flag = flag + O_TRUNC
+		end
+
+		if excl then
+			flag = flag + O_EXCL
+		end
+
+		fd, err, errno = fs.open(path, flag, '644')
+		if fd == nil then
+			return false, err, errno
+		end
+	else
+		return false, 'EINVAL: path must be a string or file descriptor', 'EINVAL'
 	end
 
 	local index = 1
@@ -572,11 +604,11 @@ function fs.writeFile(path, data, offset)
 		written, err, errno = fs.write(fd, data:sub(index), offset)
 		if written == nil then
 			fs.close(fd)
-			return nil, err, errno
+			return false, err, errno
 		end
 		if written <= 0 then
 			fs.close(fd)
-			return nil, 'write returned zero bytes', 'EIO'
+			return false, 'write returned zero bytes', 'EIO'
 		end
 
 		index = index + written
@@ -586,6 +618,33 @@ function fs.writeFile(path, data, offset)
 	end
 
 	fs.close(fd)
+	return true
+end
+
+--- Writes all of `data` to `path` atomically. This is done by writing to a temporary file and renaming it into place.
+--- @param path string
+--- @param data string
+--- @return boolean success
+--- @return string|nil error
+--- @return string|nil errno
+function fs.writeFileAtomic(path, data)
+	local tmpname
+	repeat
+		tmpname = path .. '.tmp-' .. string.format('%08x', math.random(0, 0xffffffff))
+	until not fs.exists(tmpname)
+
+	local write_success, write_err, write_errno = fs.writeFile(tmpname, data)
+	if not write_success then
+		fs.unlink(tmpname)
+		return false, write_err, write_errno
+	end
+
+	local rename_success, rename_err, rename_errno = fs.rename(tmpname, path)
+	if not rename_success then
+        fs.unlink(tmpname)
+		return false, rename_err, rename_errno
+	end
+
 	return true
 end
 
