@@ -4,24 +4,24 @@ local class = require('class')
 local char = string.char
 local floor = math.floor
 
---- @class std.writer
+--- @class std.writer : std.class<std.writer>
 --- @field closed boolean Indicates whether or not the writer has been closed.
 --- @field buffer std.buffer
 --- @field high_watermark integer
 --- @field corked boolean
-local writer = class('std.writer')
+local writer = class.new('std.writer')
 
 --- Creates an empty writer.
 --- @return std.writer
 function writer.empty()
-	local result = writer()
+	local result = writer.new()
 	result.closed = true
 	return result
 end
 
 function writer:init()
 	self.closed = false
-	self.buffer = buffer()
+	self.buffer = buffer.new()
 	self.high_watermark = 0x4000
 	self.corked = false
 end

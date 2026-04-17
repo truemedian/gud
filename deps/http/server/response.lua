@@ -32,21 +32,21 @@ local function response_has_body(response)
 	return true
 end
 
---- @class std.http.server.response
+--- @class std.http.server.response : std.class<std.http.server.response>
 --- @field request std.http.server.request
 --- @field stream std.net.stream
 --- @field status integer
 --- @field reason string
 --- @field headers std.http.headers
 --- @field writer std.http.writer.length|std.http.writer.chunked|std.writer
-local server_response = class('std.http.server.response')
+local server_response = class.new('std.http.server.response')
 
 function server_response:init(request)
 	self.request = request
 	self.stream = request.stream
 	self.state = 'finished'
 
-	self.headers = protocol.headers()
+	self.headers = protocol.headers.new()
 
 	self:reset()
 end
@@ -121,9 +121,9 @@ function server_response:respond(status, reason, timeout)
 
 	if has_body then
 		if transfer_encoding_lower == 'chunked' then
-			self.writer = protocol.chunked_writer(self.stream.writer)
+			self.writer = protocol.chunked_writer.new(self.stream.writer)
 		elseif content_length then
-			self.writer = protocol.length_writer(self.stream.writer, content_length_number)
+			self.writer = protocol.length_writer.new(self.stream.writer, content_length_number)
 		else
 			self.writer = self.stream.writer
 		end

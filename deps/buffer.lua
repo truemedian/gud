@@ -4,13 +4,13 @@ local concat = table.concat
 local max = math.max
 local sub = string.sub
 
---- @class std.buffer
+--- @class std.buffer : std.class<std.buffer>
 --- @field protected chunks string[] Stored chunks in FIFO order.
 --- @field protected head integer 1-based index of the current front chunk.
 --- @field protected tail integer 1-based index of the next tail chunk.
 --- @field protected offset integer 1-based byte offset into the current head chunk.
 --- @field protected length integer Total number of unread bytes in the buffer.
-local buffer = class('std.buffer')
+local buffer = class.new('std.buffer')
 
 function buffer:init()
 	self.chunks = {}

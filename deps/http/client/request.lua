@@ -15,7 +15,7 @@ local function append_header(lines, name, value)
 	lines[#lines + 1] = '\r\n'
 end
 
---- @class std.http.client.request
+--- @class std.http.client.request : std.class<std.http.client.request>
 --- @field stream std.net.stream
 --- @field state 'ready'|'started'|'finished'
 --- @field method string|nil
@@ -23,11 +23,11 @@ end
 --- @field version string|nil
 --- @field headers std.http.headers
 --- @field writer std.writer|std.http.writer.chunked|std.http.writer.length|nil
-local client_request = class('std.http.client.request')
+local client_request = class.new('std.http.client.request')
 
 function client_request:init(stream)
 	self.stream = stream
-	self.headers = protocol.headers()
+	self.headers = protocol.headers.new()
 	self.state = 'ready'
 	self.method = nil
 	self.target = nil
@@ -111,9 +111,9 @@ function client_request:start(method, target, version, timeout)
 	end
 
 	if is_chunked then
-		self.writer = protocol.chunked_writer(self.stream.writer)
+		self.writer = protocol.chunked_writer.new(self.stream.writer)
 	elseif content_length then
-		self.writer = protocol.length_writer(self.stream.writer, content_length)
+		self.writer = protocol.length_writer.new(self.stream.writer, content_length)
 	else
 		self.writer = self.stream.writer
 	end

@@ -4,18 +4,18 @@ local class = require('class')
 local reader = require('reader')
 local timer = require('timer')
 
---- @class std.net.tcp.reader : std.reader
+--- @class std.net.tcp.reader : std.reader, std.class<std.net.tcp.reader>
 --- @field socket uv.uv_tcp_t
 --- @field timeout std.timer
 --- @field waiting thread
 --- @field _onread fun(err: string?, chunk: string?)
 --- @field _ontimeout fun()
-local reader_tcp = class('std.net.tcp.reader', reader)
+local reader_tcp = class.new('std.net.tcp.reader', reader)
 
 function reader_tcp:init(socket)
 	reader.init(self)
 	self.socket = socket
-	self.timeout = timer()
+	self.timeout = timer.new()
 	self.waiting = nil
 
 	local function finish(n, err)

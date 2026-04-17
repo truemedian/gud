@@ -4,19 +4,19 @@ local class = require('class')
 local net = require('net')
 local timer = require('timer')
 
---- @class std.net.udp : std.net.socket
+--- @class std.net.udp : std.net.socket, std.class<std.net.udp>
 --- @field socket uv.uv_udp_t
 --- @field timeout std.timer
 --- @field waiting thread|nil
-local udp = class('std.net.udp')
+local udp = class.new('std.net.udp')
 
-function udp.new()
+function udp.create()
 	local socket, err = luv.new_udp()
 	if not socket then
 		return nil, err
 	end
 
-	return udp(socket)
+	return udp.new(socket)
 end
 
 --- Resolve one or more UDP endpoints.
@@ -31,7 +31,7 @@ end
 
 function udp:init(socket)
 	self.socket = socket
-	self.timeout = timer()
+	self.timeout = timer.new()
 	self.waiting = nil
 
 	local function finish(data, addr, flags)

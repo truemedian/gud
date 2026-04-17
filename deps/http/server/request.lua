@@ -12,7 +12,7 @@ local find = string.find
 
 local EMPTY_READER = reader.empty()
 
---- @class std.http.server.request
+--- @class std.http.server.request: std.class<std.http.server.request>
 --- @field stream std.net.stream
 --- @field method string
 --- @field target string
@@ -22,11 +22,11 @@ local EMPTY_READER = reader.empty()
 --- @field keep_alive boolean
 --- @field close_after_response boolean
 --- @field reader std.reader
-local server_request = class('std.http.server.request')
+local server_request = class.new('std.http.server.request')
 
 function server_request:init(stream)
 	self.stream = stream
-	self.headers = protocol.headers()
+	self.headers = protocol.headers.new()
 
 	self:reset()
 end
@@ -121,9 +121,9 @@ function server_request:wait(max_head_size, timeout)
 			self.close_after_response = true
 		end
 
-		self.reader = protocol.chunked_reader(self.stream.reader)
+		self.reader = protocol.chunked_reader.new(self.stream.reader)
 	elseif content_length then
-		self.reader = protocol.length_reader(self.stream.reader, content_length)
+		self.reader = protocol.length_reader.new(self.stream.reader, content_length)
 	end
 
 	return self

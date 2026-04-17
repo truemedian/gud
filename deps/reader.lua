@@ -4,16 +4,16 @@ local class = require('class')
 local byte, find = string.byte, string.find
 local max = math.max
 
---- @class std.reader
+--- @class std.reader : std.class<std.reader>
 --- @field closed boolean Indicates whether or not the reader has been closed / reached the end of the stream.
 --- @field buffer std.buffer Buffer for storing data read from the underlying source.
-local reader = class('std.reader')
+local reader = class.new('std.reader')
 
 --- Creates a new reader that is pre-filled with the given string.
 --- @param str string
 --- @return std.reader
 function reader.fixed(str)
-	local r = reader()
+	local r = reader.new()
 	r.buffer:write(str)
 	return r
 end
@@ -21,14 +21,14 @@ end
 --- Creates a new reader that is already at the end of the stream.
 --- @return std.reader
 function reader.empty()
-	local r = reader()
+	local r = reader.new()
 	r.closed = true
 	return r
 end
 
 function reader:init()
 	self.closed = false
-	self.buffer = buffer()
+	self.buffer = buffer.new()
 end
 
 --- Requests `n` bytes from the underlying source. The number `n` is a hint and the reader may either return fewer bytes

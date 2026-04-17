@@ -3,11 +3,11 @@ local class = require('class')
 --- @type std.reader
 local reader = require('reader')
 
---- @class std.net.tls.reader : std.reader
+--- @class std.net.tls.reader : std.reader, std.class<std.net.tls.reader>
 --- @field reader std.reader
 --- @field bio openssl.bio
 --- @field ssl openssl.ssl
-local reader_tls = class('std.net.tls.reader', reader)
+local reader_tls = class.new('std.net.tls.reader', reader)
 
 function reader_tls:init(reader_in, bio, ssl)
 	reader.init(self)

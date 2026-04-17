@@ -1,5 +1,9 @@
 local class = {}
 
+--- @generic T
+--- @class std.class<T>
+--- @field new fun(...): T
+
 local class_meta = {}
 
 function class_meta:__tostring()
@@ -7,13 +11,13 @@ function class_meta:__tostring()
 end
 
 function class_meta:__call(...)
-	local instance = setmetatable({}, self)
-	if instance.init then
-		instance:init(...)
-	end
-	return instance
+	return self.new(...)
 end
 
+--- @generic T
+--- @param name `T`
+--- @param base any
+--- @return std.class<T>
 function class.new(name, base)
 	local cls = {}
 
@@ -29,6 +33,14 @@ function class.new(name, base)
 
 	function cls:__tostring()
 		return string.format('%s: %p', self.__name, self)
+	end
+
+	function cls.new(...)
+		local instance = setmetatable({}, cls)
+		if instance.init then
+			instance:init(...)
+		end
+		return instance
 	end
 
 	return setmetatable(cls, class_meta)

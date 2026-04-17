@@ -28,8 +28,8 @@ local function handle_connection(stream, callback, options, errf)
 	local timeout = options.timeout
 	local max_head_size = options.max_head_size or 8192
 
-	local request = server_request(stream)
-	local response = server_response(request)
+	local request = server_request.new(stream)
+	local response = server_response.new(request)
 
 	while true do
 		local waited, err = request:wait(max_head_size, timeout)

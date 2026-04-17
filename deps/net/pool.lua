@@ -6,10 +6,10 @@ local class = require('class')
 local tcp = require('net/tcp')
 local tls = require('net/tls')
 
---- @class std.net.pool
+--- @class std.net.pool : std.class<std.net.pool>
 --- @field max_idle number
 --- @field connections std.net.stream[]
-local pool = class('std.net.pool')
+local pool = class.new('std.net.pool')
 
 local function is_stream_reusable(stream)
 	if stream.reader.closed then
@@ -25,8 +25,13 @@ end
 --- @return string
 local function stream_key(stream)
 	if class.isinstanceof(stream, tcp) then
-		--- @cast stream std.net.tcp
-		return 'tcp|' .. stream.address.addr .. '|' .. stream.address.port
+		--- @type uv.socketinfo
+		local addr = stream:ioctl('getpeername')
+		if not addr then
+			return 'tcp|unknown'
+		end
+
+		return 'tcp|' .. addr.ip .. '|' .. addr.port
 	elseif class.isinstanceof(stream, tls) then
 		--- @cast stream std.net.tls
 		return 'tls|' .. stream_key(stream.underlying)
@@ -41,7 +46,7 @@ function pool:init(max_idle)
 end
 
 function pool:lookup(host, service, hints)
-	local awaiter = await()
+	local awaiter = await.new()
 	local addr_ok, getaddrinfo_err = luv.getaddrinfo(host, service, hints, awaiter:callback())
 	if not addr_ok then
 		return nil, getaddrinfo_err
@@ -162,6 +167,6 @@ function pool:close()
 end
 
 --- @type std.net.pool
-pool.global = pool()
+pool.global = pool.new()
 
 return pool

@@ -6,15 +6,15 @@ local context = require('net/tls/context')
 local reader = require('net/tls/reader')
 local writer = require('net/tls/writer')
 
---- @class std.net.tls : std.net.stream
---- @field reader std.net.tls.reader
---- @field writer std.net.tls.writer
+--- @class std.net.tls : std.net.stream, std.class<std.net.tls>
+--- @field reader std.reader
+--- @field writer std.writer
 --- @field underlying std.net.stream
 --- @field ctx openssl.ssl.ctx
 --- @field ssl openssl.ssl
 --- @field bin openssl.bio
 --- @field bout openssl.bio
-local tls = class('std.net.tls')
+local tls = class.new('std.net.tls')
 
 --- Perform a TLS handshake on the given stream, returning a new TLS stream on success.
 --- @param stream std.net.stream
@@ -27,7 +27,7 @@ function tls.handshake(stream, options, timeout)
 	options.server = options.server == nil and (options.key ~= nil) or options.server
 
 	local ctx = options.context or context(options)
-	local self = tls(stream, ctx, options)
+	local self = tls.new(stream, ctx, options)
 
 	if not options.server then
 		assert(options.servername, 'servername is required for client connections')
@@ -99,8 +99,8 @@ function tls:init(stream, ctx, options)
 	local bin, bout = openssl.bio.mem(8192), openssl.bio.mem(8192)
 	local ssl = ctx:ssl(bin, bout, options.server)
 
-	self.reader = reader(stream.reader, bin, ssl)
-	self.writer = writer(stream.writer, bout, ssl)
+	self.reader = reader.new(stream.reader, bin, ssl)
+	self.writer = writer.new(stream.writer, bout, ssl)
 	self.underlying = stream
 
 	self.ssl = ssl
@@ -135,10 +135,10 @@ function tls:shutdown(timeout)
 	self.underlying:shutdown()
 end
 
---- @class std.net.server.tls : std.net.server
+--- @class std.net.server.tls : std.net.server, std.class<std.net.server.tls>
 --- @field underlying std.net.server
 --- @field options table
-tls.server = class('std.net.server.tls')
+tls.server = class.new('std.net.server.tls')
 
 function tls.server:init(server, options)
 	self.underlying = server

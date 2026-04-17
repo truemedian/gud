@@ -1,7 +1,7 @@
 local class = require('class')
 
---- @class std.await
-local await = class('std.await')
+--- @class std.await : std.class<std.await>
+local await = class.new('std.await')
 
 function await:wait()
 	assert(self.waiter == nil, 'already waiting')

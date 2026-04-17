@@ -6,7 +6,7 @@ local writer = require('writer')
 local timer = require('timer')
 local utility = require('utility')
 
---- @class std.net.tcp.writer : std.writer
+--- @class std.net.tcp.writer : std.class<std.net.tcp.writer>, std.writer
 --- @field socket uv.uv_tcp_t
 --- @field timeout std.timer
 --- @field waiting thread|nil
@@ -14,12 +14,12 @@ local utility = require('utility')
 --- @field _err string|nil
 --- @field _onwrite fun(err: string?)
 --- @field _ontimeout fun()
-local writer_tcp = class('std.net.tcp.writer', writer)
+local writer_tcp = class.new('std.net.tcp.writer', writer)
 
 function writer_tcp:init(socket)
 	writer.init(self)
 	self.socket = socket
-	self.timeout = timer()
+	self.timeout = timer.new()
 	self.waiting = nil
 	self.early = false
 	self._err = nil

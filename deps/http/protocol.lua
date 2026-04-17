@@ -14,10 +14,10 @@ local min = math.min
 local sub = string.sub
 local tonumber = tonumber
 
---- @class std.http.headers
+--- @class std.http.headers : std.class<std.http.headers>
 --- @field immutable boolean
 --- @field fields { [string]: string|string[] }
-local headers = class('std.http.headers')
+local headers = class.new('std.http.headers')
 
 function headers:init()
 	self.fields = {}
@@ -197,7 +197,7 @@ end
 
 --- @return std.http.headers clone
 function headers:clone()
-	local clone = headers()
+	local clone = headers.new()
 
 	for name, value in pairs(self.fields) do
 		if type(value) == 'table' then
@@ -216,10 +216,10 @@ function headers:clone()
 	return clone
 end
 
---- @class std.http.reader.chunked : std.reader
+--- @class std.http.reader.chunked : std.reader, std.class<std.http.reader.chunked>
 --- @field underlying std.reader
 --- @field chunk_left integer
-local chunked_reader = class('std.http.reader.chunked', reader)
+local chunked_reader = class.new('std.http.reader.chunked', reader)
 
 function chunked_reader:init(underlying)
 	reader.init(self)
@@ -274,10 +274,10 @@ function chunked_reader:fill(n, timeout)
 	return #chunk
 end
 
---- @class std.http.reader.length : std.reader
+--- @class std.http.reader.length : std.reader, std.class<std.http.reader.length>
 --- @field underlying std.reader
 --- @field length_left integer
-local length_reader = class('std.http.reader.length', reader)
+local length_reader = class.new('std.http.reader.length', reader)
 
 function length_reader:init(underlying, length)
 	reader.init(self)
@@ -307,10 +307,10 @@ function length_reader:fill(n, timeout)
 	return #data, err
 end
 
---- @class std.http.writer.chunked : std.writer
+--- @class std.http.writer.chunked : std.writer, std.class<std.http.writer.chunked>
 --- @field underlying std.writer
 --- @field finished boolean
-local chunked_writer = class('std.http.writer.chunked', writer)
+local chunked_writer = class.new('std.http.writer.chunked', writer)
 
 function chunked_writer:init(underlying)
 	writer.init(self)
@@ -365,10 +365,10 @@ function chunked_writer:finish(timeout)
 	return self.underlying:flushAllRecursive(timeout)
 end
 
---- @class std.http.writer.length : std.writer
+--- @class std.http.writer.length : std.writer, std.class<std.http.writer.length>
 --- @field underlying std.writer
 --- @field length_left integer
-local length_writer = class('std.http.writer.length', writer)
+local length_writer = class.new('std.http.writer.length', writer)
 
 function length_writer:init(underlying, length)
 	writer.init(self)

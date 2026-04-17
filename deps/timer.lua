@@ -3,11 +3,11 @@ local luv = require('luv')
 
 local utility = require('utility')
 
---- @class std.timer
+--- @class std.timer : std.class<std.timer>
 --- @field private handle uv.uv_timer_t
 ---
 --- A simple timer utility for scheduling functions to be called after a delay or periodically.
-local timer = class('std.timer')
+local timer = class.new('std.timer')
 
 --- Start or restart the timer. If the timer is already running, it is stopped and restarted with the new parameters.
 ---
@@ -74,7 +74,7 @@ function timer.sleep(milliseconds)
 	local co, main = coroutine.running()
 	assert(not main, 'timer.sleep cannot be called from the main thread')
 
-	local obj = timer()
+	local obj = timer.new()
 	obj:delayed(milliseconds, function()
 		obj:close()
 		return coroutine.assertresume(co)
@@ -90,7 +90,7 @@ end
 --- @param ... any Arguments to pass to `callback`
 --- @return std.timer
 function timer.delay(delay, callback, ...)
-	local obj = timer()
+	local obj = timer.new()
 	obj:delayed(delay, callback, ...)
 	return obj
 end
@@ -101,7 +101,7 @@ end
 --- @param ... any Arguments to pass to `callback`
 --- @return std.timer
 function timer.periodically(delay, callback, ...)
-	local obj = timer()
+	local obj = timer.new()
 	obj:periodic(delay, callback, ...)
 	return obj
 end

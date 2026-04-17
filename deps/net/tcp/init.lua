@@ -7,11 +7,11 @@ local net = require('net')
 local reader = require('net/tcp/reader')
 local writer = require('net/tcp/writer')
 
---- @class std.net.tcp : std.net.stream
---- @field reader std.net.tcp.reader
---- @field writer std.net.tcp.writer
+--- @class std.net.tcp : std.net.stream, std.class<std.net.tcp>
+--- @field reader std.reader
+--- @field writer std.writer
 --- @field socket uv.uv_tcp_t
-local tcp = class('std.net.tcp')
+local tcp = class.new('std.net.tcp')
 
 --- Resolve one or more TCP endpoints.
 --- @param host string|nil
@@ -34,12 +34,12 @@ function tcp.connectTo(address)
 		return nil, socket_err
 	end
 
-	local awaiter = await()
+	local awaiter = await.new()
 	local connect_ok, connect_err = socket:connect(address.addr, address.port, awaiter:callback())
 	if connect_ok then
 		local connect_fail = awaiter:wait()
 		if not connect_fail then
-			return tcp(socket)
+			return tcp.new(socket)
 		end
 	end
 
@@ -75,8 +75,8 @@ function tcp.connect(host, service, hints)
 end
 
 function tcp:init(socket)
-	self.reader = reader(socket)
-	self.writer = writer(socket)
+	self.reader = reader.new(socket)
+	self.writer = writer.new(socket)
 	self.socket = socket
 end
 
@@ -120,9 +120,9 @@ function tcp:shutdown(timeout)
 	self.socket:shutdown()
 end
 
---- @class std.net.server.tcp : std.net.server
+--- @class std.net.server.tcp : std.net.server, std.class<std.net.server.tcp>
 --- @field socket uv.uv_tcp_t
-tcp.server = class('std.net.server.tcp')
+tcp.server = class.new('std.net.server.tcp')
 
 --- @param family? string|integer
 function tcp.server:init(family)
@@ -147,7 +147,7 @@ function tcp.server:listen(backlog, callback)
 		local client = assert(luv.new_tcp())
 		self.socket:accept(client)
 
-		local stream = tcp(client)
+		local stream = tcp.new(client)
 		return callback(stream)
 	end))
 end

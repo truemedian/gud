@@ -25,7 +25,7 @@ local function response_has_body(method, status)
 	return true
 end
 
---- @class std.http.client.response
+--- @class std.http.client.response : std.class<std.http.client.response>
 --- @field request std.http.client.request
 --- @field stream std.net.stream
 --- @field state 'ready'|'started'|'finished'
@@ -36,12 +36,12 @@ end
 --- @field keep_alive boolean
 --- @field close_after_response boolean
 --- @field reader std.reader
-local client_response = class('std.http.client.response')
+local client_response = class.new('std.http.client.response')
 
 function client_response:init(request)
 	self.request = request
 	self.stream = request.stream
-	self.headers = protocol.headers()
+	self.headers = protocol.headers.new()
 	self.state = 'ready'
 	self.version = nil
 	self.status = nil
@@ -144,9 +144,9 @@ function client_response:wait(max_head_size, timeout)
 			self.close_after_response = true
 		end
 
-		self.reader = protocol.chunked_reader(self.stream.reader)
+		self.reader = protocol.chunked_reader.new(self.stream.reader)
 	elseif content_length then
-		self.reader = protocol.length_reader(self.stream.reader, content_length)
+		self.reader = protocol.length_reader.new(self.stream.reader, content_length)
 	elseif response_has_body(self.request.method, status) then
 		if self.keep_alive then
 			return false, 'missing content-length or transfer-encoding header with keep-alive connection'

@@ -205,7 +205,7 @@ function client.fetch(method, url, headers, payload, options)
 
 	options = options or {}
 	method = upper(method)
-	headers = headers or protocol.headers()
+	headers = headers or protocol.headers.new()
 
 	local max_redirects = options.max_redirects or 10
 	for redirects = 0, max_redirects do

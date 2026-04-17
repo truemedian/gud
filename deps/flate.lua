@@ -14,11 +14,11 @@ function flate.decompress(data)
 	return miniz.inflate(data, 0)
 end
 
---- @class std.flate.writer : std.writer
+--- @class std.flate.writer : std.writer, std.class<std.flate.writer>
 --- @field underlying std.writer
 --- @field state userdata
 --- @field adler integer|nil
-flate.writer = class('std.flate.writer', writer)
+flate.writer = class.new('std.flate.writer', writer)
 
 function flate.writer:init(underlying, compute_adler)
 	self.underlying = underlying
@@ -74,11 +74,11 @@ function flate.writer:finish(timeout)
 	return true
 end
 
---- @class std.flate.reader : std.reader
+--- @class std.flate.reader : std.reader, std.class<std.flate.reader>
 --- @field underlying std.reader
 --- @field state userdata
 --- @field adler integer|nil
-flate.reader = class('std.flate.reader', reader)
+flate.reader = class.new('std.flate.reader', reader)
 
 function flate.reader:init(underlying, compute_adler)
 	self.underlying = underlying
@@ -119,8 +119,8 @@ function flate.zlib.decompress(data)
 	return miniz.inflate(data, 1)
 end
 
---- @class std.flate.zlib.writer : std.flate.writer
-flate.zlib.writer = class('std.flate.zlib.writer', flate.writer)
+--- @class std.flate.zlib.writer : std.flate.writer, std.class<std.flate.zlib.writer>
+flate.zlib.writer = class.new('std.flate.zlib.writer', flate.writer)
 
 function flate.zlib.writer:init(underlying)
 	flate.writer.init(self, underlying, true)
@@ -143,8 +143,8 @@ function flate.zlib.writer:finish(timeout)
 	return true
 end
 
---- @class std.flate.zlib.reader : std.flate.reader
-flate.zlib.reader = class('std.flate.zlib.reader', flate.reader)
+--- @class std.flate.zlib.reader : std.flate.reader, std.class<std.flate.zlib.reader>
+flate.zlib.reader = class.new('std.flate.zlib.reader', flate.reader)
 
 function flate.zlib.reader:init(underlying)
 	flate.reader.init(self, underlying, true)
