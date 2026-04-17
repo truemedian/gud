@@ -14,10 +14,6 @@ local min = math.min
 local sub = string.sub
 local tonumber = tonumber
 
-local function trim(value)
-	return match(value, '^[ \t]*(.-)[ \t]*$')
-end
-
 --- @class std.http.headers
 --- @field immutable boolean
 --- @field fields { [string]: string|string[] }
@@ -144,7 +140,7 @@ function headers:list(name)
 				end
 			end
 
-			item = trim(item)
+			item = string.trim(item, '[ \t]')
 			if #item > 0 then
 				return item
 			end

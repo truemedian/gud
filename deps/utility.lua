@@ -2,18 +2,6 @@ local unpack = table.unpack or unpack
 
 local utility = {}
 
-local function assertresume_aux(success, ...)
-	if success then
-		return ...
-	else
-		return error(..., 1)
-	end
-end
-
-function utility.assertresume(co, ...)
-	return assertresume_aux(coroutine.resume(co, ...))
-end
-
 function utility.bind1(fn, a)
 	return function(...)
 		return fn(a, ...)
@@ -69,25 +57,6 @@ function utility.bind(fn, ...)
 			end
 
 			return fn(unpack(bound_args, 1, bound_len + n))
-		end
-	end
-end
-
-function utility.sortedpairs(tbl, cmp)
-	local keys, n = {}, 0
-	for k in pairs(tbl) do
-		n = n + 1
-		keys[n] = k
-	end
-
-	table.sort(keys, cmp)
-
-	local i = 0
-	return function()
-		i = i + 1
-		local k = keys[i]
-		if k then
-			return k, tbl[k]
 		end
 	end
 end

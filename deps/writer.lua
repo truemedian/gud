@@ -26,6 +26,29 @@ function writer:init()
 	self.corked = false
 end
 
+--- Corks the writer, preventing it from flushing data until `uncork` is called. This is useful for batching multiple]
+--- writes together to improve performance. If the writer is already corked, this is a no-op.
+function writer:cork()
+	self.corked = true
+end
+
+--- Uncorks the writer, allowing it to flush data again. If the writer is already uncorked, this is a no-op.
+--- @param timeout integer
+--- @return boolean success
+--- @return string|nil err
+function writer:uncork(timeout)
+	if not self.corked then
+		return true
+	end
+
+	self.corked = false
+	if #self.buffer > self.high_watermark then
+		return self:flushAll(timeout)
+	end
+
+	return true
+end
+
 --- Flushes as much data as possible to the underlying sink. Should return as soon as at least one byte can be flushed,
 --- but may flush more data if possible before returning. If the writer returns `0` bytes flushed, it means that the end
 --- of the stream has been reached and no more data can be written.

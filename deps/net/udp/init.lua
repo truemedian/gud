@@ -3,7 +3,6 @@ local luv = require('luv')
 local class = require('class')
 local net = require('net')
 local timer = require('timer')
-local utility = require('utility')
 
 --- @class std.net.udp : std.net.socket
 --- @field socket uv.uv_udp_t
@@ -42,7 +41,7 @@ function udp:init(socket)
 		self.timeout:stop()
 		self.socket:recv_stop()
 
-		return utility.assertresume(thread, data, addr, flags)
+		return coroutine.assertresume(thread, data, addr, flags)
 	end
 
 	function self._onread(err, data, addr, flags)
@@ -103,7 +102,7 @@ function udp:send(data, host, port, timeout)
 		self.timeout:stop()
 
 		if waiting then
-			return utility.assertresume(thread, result, result_err)
+			return coroutine.assertresume(thread, result, result_err)
 		end
 
 		success, err = result, result_err

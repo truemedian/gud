@@ -402,6 +402,10 @@ end
 --- @return fun(): string|nil
 function path.windows.split(pathname)
 	local root = path.windows.getRoot(pathname)
+	if root == '.' then
+		return gmatch(pathname, '[^/\\]+')
+	end
+
 	return gmatch(pathname:sub(#root + 1), '[^/\\]+')
 end
 

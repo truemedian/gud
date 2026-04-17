@@ -1,0 +1,5 @@
+require('extensions/base')
+require('extensions/coroutine')
+require('extensions/math')
+require('extensions/string')
+require('extensions/table')

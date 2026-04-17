@@ -2,9 +2,7 @@ local class = require('class')
 
 --- @type std.reader
 local reader = require('reader')
-
 local timer = require('timer')
-local utility = require('utility')
 
 --- @class std.net.tcp.reader : std.reader
 --- @field socket uv.uv_tcp_t
@@ -26,7 +24,7 @@ function reader_tcp:init(socket)
 
 			local waiting = self.waiting
 			self.waiting = nil
-			return utility.assertresume(waiting, n, err)
+			return coroutine.assertresume(waiting, n, err)
 		end
 
 		if err then
@@ -55,7 +53,7 @@ function reader_tcp:init(socket)
 
 		local waiting = assert(self.waiting)
 		self.waiting = nil
-		return utility.assertresume(waiting, 0, 'timeout')
+		return coroutine.assertresume(waiting, 0, 'timeout')
 	end
 end
 

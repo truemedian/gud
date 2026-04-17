@@ -1,7 +1,5 @@
 local luv = require('luv')
 
-local utility = require('utility')
-
 local net = {}
 
 net.tcp = require('net/tcp')
@@ -36,7 +34,7 @@ function net.resolve(host, service, hints, protocol)
 
 	local ok, getaddrinfo_err = luv.getaddrinfo(host, service, hints, function(err, addrs)
 		if waiting then
-			return utility.assertresume(thread, err, addrs)
+			return coroutine.assertresume(thread, err, addrs)
 		end
 
 		resolve_err, addresses = err, addrs

@@ -125,10 +125,7 @@ flate.zlib.writer = class('std.flate.zlib.writer', flate.writer)
 function flate.zlib.writer:init(underlying)
 	flate.writer.init(self, underlying, true)
 
-	local corked = self.underlying.corked
-	self.underlying.corked = true
-	self.underlying:write('\x78\x9c')
-	self.underlying.corked = corked
+	self.underlying.buffer:write('\x78\x9c')
 end
 
 function flate.zlib.writer:finish(timeout)

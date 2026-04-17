@@ -77,7 +77,7 @@ function timer.sleep(milliseconds)
 	local obj = timer()
 	obj:delayed(milliseconds, function()
 		obj:close()
-		return utility.assertresume(co)
+		return coroutine.assertresume(co)
 	end)
 
 	return coroutine.yield()

@@ -8,7 +8,7 @@ local querystring = {}
 --- @return table
 function querystring.decode(str, space)
 	local result = {}
-	for pair in str:gmatch('([^&]+)') do
+	for pair in string.split(str, '&', true) do
 		local key, value = pair:match('([^=]*)=?(.*)')
 		if key then
 			key = uri.percentDecode(key, space)
@@ -34,7 +34,7 @@ end
 --- @return string
 function querystring.encode(tbl, space)
 	local parts, n = {}, 0
-	for key, value in utility.sortedpairs(tbl) do
+	for key, value in spairs(tbl) do
 		key = uri.percentEncode(tostring(key), space)
 
 		if type(value) == 'table' then

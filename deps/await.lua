@@ -1,7 +1,5 @@
 local class = require('class')
 
-local utility = require('utility')
-
 --- @class std.await
 local await = class('std.await')
 
@@ -18,7 +16,7 @@ function await:signal(...)
 	local waiter = self.waiter
 	self.waiter = nil
 
-	return utility.assertresume(waiter, ...)
+	return coroutine.assertresume(waiter, ...)
 end
 
 function await:callback()

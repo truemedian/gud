@@ -9,7 +9,8 @@ local utility = require('utility')
 --- @class std.net.tcp.writer : std.writer
 --- @field socket uv.uv_tcp_t
 --- @field timeout std.timer
---- @field waiting thread|boolean|nil
+--- @field waiting thread|nil
+--- @field early boolean
 --- @field _err string|nil
 --- @field _onwrite fun(err: string?)
 --- @field _ontimeout fun()
@@ -20,6 +21,7 @@ function writer_tcp:init(socket)
 	self.socket = socket
 	self.timeout = timer()
 	self.waiting = nil
+	self.early = false
 	self._err = nil
 
 	function self._onwrite(err)
@@ -28,21 +30,21 @@ function writer_tcp:init(socket)
 		if self.waiting then
 			if err then
 				self.socket:shutdown()
-				return utility.assertresume(self.waiting, 0, err)
+				return coroutine.assertresume(self.waiting, 0, err)
 			end
 
-			return utility.assertresume(self.waiting, #self.buffer)
+			return coroutine.assertresume(self.waiting, #self.buffer)
 		elseif err then
 			self._err = err
 			return self.socket:shutdown()
 		end
 
-		self.waiting = true
+		self.early = true
 	end
 
 	function self._ontimeout()
 		self.socket:shutdown()
-		return utility.assertresume(self.waiting, 0, 'timeout')
+		return coroutine.assertresume(self.waiting, 0, 'timeout')
 	end
 end
 
@@ -52,19 +54,14 @@ function writer_tcp:flush(timeout)
 	local thread = coroutine.running()
 	local pending = #self.buffer
 
+	self.early = false
 	local req, write_err = self.socket:write(parts, self._onwrite)
 	if not req then
 		self.socket:shutdown()
 		return 0, write_err
 	end
 
-	if timeout then
-		self.timeout:delayed(timeout, self._ontimeout)
-	end
-
-	if self.waiting then
-		self.waiting = nil
-
+	if self.early then
 		if self._err then
 			local err = self._err
 			self._err = nil
@@ -72,6 +69,10 @@ function writer_tcp:flush(timeout)
 		end
 
 		return pending
+	end
+
+	if timeout then
+		self.timeout:delayed(timeout, self._ontimeout)
 	end
 
 	self.waiting = thread
