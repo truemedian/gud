@@ -10,6 +10,45 @@ table.pack = table.pack or function(...)
 	return { n = select('#', ...), ... }
 end
 
+--- Returns a shallow copy of `tbl`.
+--- @generic K, V
+--- @param tbl table<K, V>
+--- @return table<K, V>
+function table.copy(tbl)
+	local copy = {}
+
+	for k, v in pairs(tbl) do
+		copy[k] = v
+	end
+
+	return copy
+end
+
+--- Returns a deep copy of `tbl`.
+--- @generic K, V
+--- @param tbl table<K, V>
+--- @param seen? table<V, table<K, V>>
+--- @return table<K, V>
+function table.deepcopy(tbl, seen)
+	seen = seen or {}
+	if seen[tbl] then
+		return seen[tbl]
+	end
+
+	local copy = {}
+	seen[tbl] = copy
+
+	for k, v in pairs(tbl) do
+		if type(v) == 'table' then
+			v = table.deepcopy(v)
+		end
+
+		copy[k] = v
+	end
+
+	return copy
+end
+
 --- Returns a new table containing the results of applying `mapper` to each entry of `tbl`.
 --- @generic K, V, NK, NV
 --- @param tbl table<K, V>
@@ -341,4 +380,13 @@ function table.combinations(tbl, n)
 	end
 
 	return coroutine.wrap(combine), 1, 1
+end
+
+pcall(require, 'table.clear')
+if not table.clear then
+	function table.clear(tbl)
+		for k in pairs(tbl) do
+			tbl[k] = nil
+		end
+	end
 end

@@ -1,6 +1,33 @@
 local floor, ceil, random, min = math.floor, math.ceil, math.random, math.min
-local byte, rep, char, find, match = string.byte, string.rep, string.char, string.find, string.match
+local sub, byte, rep, char, find, match = string.sub, string.byte, string.rep, string.char, string.find, string.match
 local concat = table.concat
+
+--- Returns true if `str` starts with `prefix`.
+--- @param str string
+--- @param prefix string
+--- @param plain? boolean
+--- @return boolean
+function string.startswith(str, prefix, plain)
+	if plain then
+		return sub(str, 1, #prefix) == prefix
+	end
+
+	return find(str, '^' .. prefix) == 1
+end
+
+--- Returns true if `str` ends with `suffix`.
+--- @param str string
+--- @param suffix string
+--- @param plain? boolean
+--- @return boolean
+function string.endswith(str, suffix, plain)
+	if plain then
+		return sub(str, -#suffix) == suffix
+	end
+
+	local _, j = find(str, suffix .. '$')
+	return j == #str
+end
 
 --- Returns a new string with all leading and trailing occurrences of the pattern removed.
 ---
