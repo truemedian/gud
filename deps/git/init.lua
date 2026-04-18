@@ -4,7 +4,6 @@ git.oid_type = require('git/oid_type')
 
 git.identity = require('git/object/identity')
 git.object = require('git/object')
-git.blob = require('git/object/blob')
 git.tree = require('git/object/tree')
 git.commit = require('git/object/commit')
 git.tag = require('git/object/tag')

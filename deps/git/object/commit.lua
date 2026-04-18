@@ -4,15 +4,22 @@ local identity = require('git/object/identity')
 local object = require('git/object')
 
 --- @class std.git.object.commit : std.git.object, std.class<std.git.object.commit>
---- @field tree string
---- @field parents string[]
+--- @field tree std.git.oid
+--- @field parents std.git.oid[]
 --- @field author std.git.identity
 --- @field committer std.git.identity
 --- @field message string
 local commit = class.new('std.git.object.commit', object)
 commit.kind = 'commit'
 
---- @param info table
+--- @class std.git.object.commit.info
+--- @field tree std.git.oid
+--- @field parents? std.git.oid[]
+--- @field author std.git.identity
+--- @field committer std.git.identity
+--- @field message? string
+
+--- @param info std.git.object.commit.info
 function commit:init(info)
 	self.tree = info.tree
 	self.parents = info.parents or {}

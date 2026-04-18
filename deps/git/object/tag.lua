@@ -12,7 +12,14 @@ local object = require('git/object')
 local tag = class.new('std.git.object.tag', object)
 tag.kind = 'tag'
 
---- @param info table
+--- @class std.git.object.tag.info
+--- @field object std.git.oid
+--- @field type string
+--- @field name string
+--- @field tagger std.git.identity
+--- @field message string
+
+--- @param info std.git.object.tag.info
 function tag:init(info)
 	self.object = info.object
 	self.type = info.type

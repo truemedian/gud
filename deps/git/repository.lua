@@ -3,7 +3,6 @@ local class = require('class')
 local fs = require('fs')
 local path = require('path')
 
-local blob = require('git/object/blob')
 local commit = require('git/object/commit')
 local database = require('git/database')
 local oid_type = require('git/oid_type')
@@ -13,13 +12,13 @@ local tree = require('git/object/tree')
 
 --- @class std.git.repository : std.class<std.git.repository>
 --- @field git_dir string
---- @field oid_type table
+--- @field oid_type std.git.oid_type
 --- @field database std.git.database
 --- @field refs std.git.refs
 local repository = class.new('std.git.repository')
 
 --- @param git_dir string
---- @param options? { bare: boolean|nil, oid: 'sha1'|'sha256'|nil }
+--- @param options? { oid: 'sha1'|'sha256'|nil }
 function repository:init(git_dir, options)
 	assert(type(git_dir) == 'string' and #git_dir > 0, 'git_dir must be a non-empty string')
 
@@ -28,13 +27,6 @@ function repository:init(git_dir, options)
 	self.oid_type = oid_type.new(options.oid or 'sha1')
 	self.database = database.new(git_dir, self.oid_type)
 	self.refs = refs.new(git_dir, self.oid_type)
-end
-
---- @param git_dir string
---- @param options? { bare: boolean|nil, oid: 'sha1'|'sha256'|nil }
---- @return std.git.repository
-function repository.open(git_dir, options)
-	return repository.new(git_dir, options)
 end
 
 --- @return boolean
@@ -46,9 +38,9 @@ function repository:exists()
 	return fs.exists(self.database.objects_dir) and fs.exists(self.refs.refs_dir)
 end
 
---- @return boolean|nil
+--- @return boolean success
 --- @return string|nil err
-function repository:initBare()
+function repository:load()
 	local dirs = {
 		self.git_dir,
 		path.join(self.git_dir, 'objects'),
@@ -56,14 +48,13 @@ function repository:initBare()
 		path.join(self.git_dir, 'refs', 'heads'),
 		path.join(self.git_dir, 'refs', 'tags'),
 		path.join(self.git_dir, 'refs', 'remotes'),
-		path.join(self.git_dir, 'hooks'),
 		path.join(self.git_dir, 'info'),
 	}
 
 	for i = 1, #dirs do
 		local ok, err = fs.mkdirp(dirs[i])
 		if not ok then
-			return nil, err
+			return false, err
 		end
 	end
 
@@ -71,16 +62,36 @@ function repository:initBare()
 	if not fs.exists(head_path) then
 		local ok, err = fs.writeFile(head_path, 'ref: refs/heads/main\n')
 		if not ok then
-			return nil, err
+			return false, err
 		end
 	end
 
 	local config_path = path.join(self.git_dir, 'config')
 	if not fs.exists(config_path) then
-		local config = '[core]\n\trepositoryformatversion = 0\n\tbare = true\n\tfilemode = true\n'
-		local ok, err = fs.writeFile(config_path, config)
+		local lines = {
+			'[core]',
+			'  repositoryformatversion = 1',
+			'  bare = true',
+			'  filemode = true',
+			'  symlinks = false',
+			'[extensions]',
+			'  objectFormat = ' .. self.oid_type.alg,
+		}
+
+		local ok, err = fs.writeFile(config_path, table.concat(lines, '\n'))
 		if not ok then
-			return nil, err
+			return false, err
+		end
+	else
+		local config_content, err = fs.readFile(config_path)
+		if not config_content then
+			return false, err
+		end
+
+		local object_format = config_content:match('objectFormat%s*=%s*(%w+)') or 'sha1'
+		if object_format ~= self.oid_type.alg then
+			return false,
+				string.format('repository uses %s object format, expected %s', object_format, self.oid_type.alg)
 		end
 	end
 
@@ -101,7 +112,7 @@ end
 --- @return string|nil payload
 --- @return string|nil err
 function repository:readObject(oid)
-	return self.database:readLoose(oid)
+	return self.database:readObject(oid)
 end
 
 --- @param oid std.git.oid
@@ -118,7 +129,7 @@ function repository:writeBlob(data)
 end
 
 --- @param oid std.git.oid
---- @return std.git.object.blob|nil
+--- @return string|nil
 --- @return string|nil err
 function repository:readBlob(oid)
 	local kind, payload, err = self:readObject(oid)
@@ -130,7 +141,7 @@ function repository:readBlob(oid)
 		return nil, 'object is not a blob'
 	end
 
-	return blob.parse(payload), nil
+	return payload, nil
 end
 
 --- @param entries std.git.object.tree.entry[]
@@ -161,7 +172,7 @@ function repository:readTree(oid)
 	return tree.parse(payload, self.oid_type)
 end
 
---- @param value std.git.object.commit
+--- @param value std.git.object.commit.info
 --- @return std.git.oid|nil oid
 --- @return string|nil err
 function repository:writeCommit(value)
@@ -189,7 +200,7 @@ function repository:readCommit(oid)
 	return commit.parse(payload, self.oid_type)
 end
 
---- @param value std.git.object.tag
+--- @param value std.git.object.tag.info
 --- @return std.git.oid|nil oid
 --- @return string|nil err
 function repository:writeTag(value)

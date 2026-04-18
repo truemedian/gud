@@ -15,6 +15,12 @@ local floor = math.floor
 local tree = class.new('std.git.object.tree', object)
 tree.kind = 'tree'
 
+tree.mode_directory = 0x4000
+tree.mode_file = 0x81a4
+tree.mode_executable = 0x81ed
+tree.mode_symlink = 0xa000
+tree.mode_gitlink = 0xc000
+
 --- Returns the permission bits of a tree entry mode.
 ---
 --- The low 3 bits represent the RWX permissions of any user.
