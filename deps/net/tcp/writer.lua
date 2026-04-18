@@ -4,7 +4,6 @@ local class = require('class')
 local writer = require('writer')
 
 local timer = require('timer')
-local utility = require('utility')
 
 --- @class std.net.tcp.writer : std.class<std.net.tcp.writer>, std.writer
 --- @field socket uv.uv_tcp_t

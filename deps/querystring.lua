@@ -1,5 +1,4 @@
 local uri = require('uri')
-local utility = require('utility')
 
 local querystring = {}
 

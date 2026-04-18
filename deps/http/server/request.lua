@@ -8,7 +8,6 @@ local reader = require('reader')
 
 local lower = string.lower
 local tonumber = tonumber
-local find = string.find
 
 local EMPTY_READER = reader.empty()
 

@@ -1,11 +1,6 @@
 local server_request = require('http/server/request')
 local server_response = require('http/server/response')
 
-local utility = require('utility')
-
-local tcp = require('net/tcp')
-local tls = require('net/tls')
-
 --- @class std.http.server
 local server = {}
 

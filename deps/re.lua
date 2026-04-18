@@ -16,8 +16,6 @@ local mm = m
 -- patterns' metatable
 local mt = getmetatable(mm.P(0))
 
-local version = _VERSION
-
 -- No more global accesses after this point
 _ENV = nil -- does no harm in Lua 5.1
 
@@ -264,9 +262,5 @@ local re = {
 	gsub = gsub,
 	updatelocale = updatelocale,
 }
-
--- if version == "Lua 5.1" then
--- 	_G.re = re
--- end
 
 return re
